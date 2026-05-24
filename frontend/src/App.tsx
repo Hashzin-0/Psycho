@@ -350,6 +350,11 @@ export default function App() {
         case MultimodalLiveResponseType.INTERRUPTED:
           audioPlayerRef.current?.interrupt()
           break
+        case MultimodalLiveResponseType.SESSION_RESUMPTION_UPDATE:
+          if (message.data?.newHandle) {
+            console.debug("Session resumption handle:", message.data.newHandle)
+          }
+          break
       }
     },
     [addMessage, updateDebug, agent]
@@ -585,6 +590,9 @@ export default function App() {
           addMessage(greet, "assistant")
           setGreetingShown(true)
         }
+      }
+
+      client.onSetupComplete = () => {
         startAudioStreaming()
       }
 

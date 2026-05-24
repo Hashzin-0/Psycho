@@ -8,6 +8,7 @@ export enum MultimodalLiveResponseType {
   ERROR = "ERROR",
   INPUT_TRANSCRIPTION = "INPUT_TRANSCRIPTION",
   OUTPUT_TRANSCRIPTION = "OUTPUT_TRANSCRIPTION",
+  SESSION_RESUMPTION_UPDATE = "SESSION_RESUMPTION_UPDATE",
 }
 
 export interface TranscriptionData {
@@ -97,6 +98,14 @@ function parseResponseMessages(data: any): ResponseMessage[] {
     if (serverContent?.turnComplete) {
       responses.push({ type: MultimodalLiveResponseType.TURN_COMPLETE, data: "", endOfTurn: true })
     }
+
+    if (data?.sessionResumptionUpdate) {
+      responses.push({
+        type: MultimodalLiveResponseType.SESSION_RESUMPTION_UPDATE,
+        data: data.sessionResumptionUpdate,
+        endOfTurn: false,
+      })
+    }
   } catch (err) {
     console.log("Error parsing response data: ", err, data)
   }
@@ -131,7 +140,7 @@ export class GeminiLiveAPI {
     start_of_speech_sensitivity: "START_SENSITIVITY_HIGH",
   }
 
-  activityHandling = "ACTIVITY_HANDLING_BETTER_IDEAL"
+  activityHandling = "START_OF_ACTIVITY_INTERRUPTS"
 
   setPublicMode(enabled: boolean) {
     if (enabled) {
@@ -174,6 +183,8 @@ export class GeminiLiveAPI {
   onOpen: () => void = () => {}
   onClose: () => void = () => {}
   onError: (message: string) => void = () => {}
+  onSetupComplete: () => void = () => {}
+  onSessionResumptionUpdate: (update: any) => void = () => {}
 
   constructor(token: string, model: string) {
     this.token = token
@@ -278,6 +289,12 @@ export class GeminiLiveAPI {
       const messageData = JSON.parse(jsonData)
       const responses = parseResponseMessages(messageData)
       for (const response of responses) {
+        if (response.type === MultimodalLiveResponseType.SETUP_COMPLETE) {
+          this.onSetupComplete()
+        }
+        if (response.type === MultimodalLiveResponseType.SESSION_RESUMPTION_UPDATE) {
+          this.onSessionResumptionUpdate(response.data)
+        }
         this.onReceiveResponse(response)
       }
     } catch (err) {
@@ -288,7 +305,8 @@ export class GeminiLiveAPI {
   private setupWebSocketToService() {
     this.webSocket = new WebSocket(this.serviceUrl)
 
-    this.webSocket.onclose = () => {
+    this.webSocket.onclose = (event: CloseEvent) => {
+      console.warn(`WebSocket fechado: code=${event.code}, reason=${event.reason}, wasClean=${event.wasClean}`)
       this.connected = false
       this.onClose()
     }
@@ -343,6 +361,10 @@ export class GeminiLiveAPI {
       },
     }
 
+    sessionSetupMessage.setup.sessionResumption = {
+      transparent: true,
+    }
+
     if (this.inputAudioTranscription) {
       sessionSetupMessage.setup.inputAudioTranscription = {}
     }
@@ -386,7 +408,7 @@ export class GeminiLiveAPI {
   }
 
   sendAudioMessage(base64PCM: string) {
-    this.sendRealtimeInputMessage(base64PCM, "audio/pcm")
+    this.sendRealtimeInputMessage(base64PCM, "audio/pcm;rate=16000")
   }
 
   sendImageMessage(base64Image: string, mimeType = "image/jpeg") {
