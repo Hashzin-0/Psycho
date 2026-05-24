@@ -34,6 +34,10 @@ interface Props {
   trainingProgress: TrainingProgress | null
   onTrainVoice: () => void
   onResetVoice: () => void
+  onTestTimbre: () => void
+  isTestingTimbre: boolean
+  testTimbreScore: number | null
+  testTimbreMatch: boolean | null
 }
 
 const voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
@@ -71,7 +75,7 @@ function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange
   )
 }
 
-export default function SettingsModal({ open, settings, onClose, onChange, voiceProfileEnrolled, isTraining, trainingProgress, onTrainVoice, onResetVoice }: Props) {
+export default function SettingsModal({ open, settings, onClose, onChange, voiceProfileEnrolled, isTraining, trainingProgress, onTrainVoice, onResetVoice, onTestTimbre, isTestingTimbre, testTimbreScore, testTimbreMatch }: Props) {
   const [testTranscript, setTestTranscript] = useState<string | null>(null)
   const [testConfidence, setTestConfidence] = useState<number | null>(null)
   const [isTesting, setIsTesting] = useState(false)
@@ -345,6 +349,68 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                       ? "Tu perfil vocal está guardado. El filtro avanzado puede reconocer tu voz por timbre."
                       : "Your voice profile is saved. The advanced filter can recognize your voice by timbre."}
                   </p>
+                  <button
+                    onClick={onTestTimbre}
+                    disabled={isTestingTimbre}
+                    className="w-full px-3 py-2.5 rounded-xl text-xs font-medium bg-indigo-100 text-indigo-700 hover:bg-indigo-200 border border-indigo-200 transition-all disabled:opacity-50"
+                  >
+                    {isTestingTimbre
+                      ? (lang === "pt" ? "🎵 Analisando..." : lang === "es" ? "🎵 Analizando..." : "🎵 Analyzing...")
+                      : (lang === "pt" ? "🎵 Testar Timbre" : lang === "es" ? "🎵 Probar Timbre" : "🎵 Test Voice Timbre")}
+                  </button>
+
+                  {isTestingTimbre && (
+                    <div className="space-y-2 bg-white/60 rounded-xl p-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">
+                          {lang === "pt" ? "Similaridade" : lang === "es" ? "Similitud" : "Similarity"}
+                        </span>
+                        <span className={`font-semibold ${testTimbreMatch ? "text-emerald-600" : "text-red-500"}`}>
+                          {testTimbreScore !== null ? Math.round(testTimbreScore * 100) + "%" : "0%"}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-200 ${
+                            testTimbreMatch ? "bg-emerald-500" : "bg-red-400"
+                          }`}
+                          style={{ width: `${testTimbreScore !== null ? Math.round(testTimbreScore * 100) : 0}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-center gap-1.5 text-xs">
+                        {testTimbreMatch === true && (
+                          <span className="text-emerald-600 font-medium">✅ Sua Voz</span>
+                        )}
+                        {testTimbreMatch === false && (
+                          <span className="text-red-500 font-medium">❌ Voz Rejeitada</span>
+                        )}
+                        {testTimbreMatch === null && (
+                          <span className="text-slate-400">
+                            {lang === "pt" ? "Aguardando..." : lang === "es" ? "Esperando..." : "Waiting..."}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {!isTestingTimbre && testTimbreScore !== null && (
+                    <div className="space-y-2 bg-slate-50 rounded-xl p-3 border border-slate-200">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">
+                          {lang === "pt" ? "Último teste" : lang === "es" ? "Última prueba" : "Last test"}
+                        </span>
+                        <span className={`font-semibold ${testTimbreMatch ? "text-emerald-600" : "text-red-500"}`}>
+                          {Math.round(testTimbreScore * 100)}%
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-center gap-1.5 text-xs">
+                        {testTimbreMatch
+                          ? <span className="text-emerald-600 font-medium">✅ Sua Voz</span>
+                          : <span className="text-red-500 font-medium">❌ Voz Rejeitada</span>}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <button
                       onClick={onTrainVoice}

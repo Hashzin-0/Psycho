@@ -73,6 +73,9 @@ export default function App() {
   const [voiceProfileEnrolled, setVoiceProfileEnrolled] = useState(false)
   const [isTraining, setIsTraining] = useState(false)
   const [trainingProgress, setTrainingProgress] = useState<{ textIndex: number; totalTexts: number; phase: "recording" | "processing" | "done" } | null>(null)
+  const [isTestingTimbre, setIsTestingTimbre] = useState(false)
+  const [testTimbreScore, setTestTimbreScore] = useState<number | null>(null)
+  const [testTimbreMatch, setTestTimbreMatch] = useState<boolean | null>(null)
 
   const voiceProfileRef = useRef<VoiceProfile>(new VoiceProfile())
 
@@ -371,9 +374,9 @@ export default function App() {
             autoGainControl: settings.autoGainControl,
           },
         })
-        if (voiceProfileEnrolled) {
-          audioStreamerRef.current.setVoiceProfile(voiceProfileRef.current)
-          audioStreamerRef.current.setVoiceFilter(settings.voiceFilterEnabled, settings.voiceFilterThreshold)
+        if (voiceProfileRef.current.isEnrolled) {
+          audioStreamerRef.current?.setVoiceProfile(voiceProfileRef.current)
+          audioStreamerRef.current?.setVoiceFilter(settings.voiceFilterEnabled, settings.voiceFilterThreshold)
         }
         setIsAudioStreaming(true)
         addMessage("[Microfone ativado automaticamente]", "system")
@@ -381,7 +384,7 @@ export default function App() {
     } catch (err: any) {
       addMessage("[Erro ao ativar microfone: " + err.message + "]", "system")
     }
-  }, [addMessage, settings, voiceProfileEnrolled])
+  }, [addMessage, settings])
 
   const toggleAudio = useCallback(async () => {
     if (!isAudioStreaming) {
@@ -399,9 +402,9 @@ export default function App() {
               autoGainControl: settings.autoGainControl,
             },
           })
-          if (voiceProfileEnrolled) {
-            audioStreamerRef.current.setVoiceProfile(voiceProfileRef.current)
-            audioStreamerRef.current.setVoiceFilter(settings.voiceFilterEnabled, settings.voiceFilterThreshold)
+          if (voiceProfileRef.current.isEnrolled) {
+            audioStreamerRef.current?.setVoiceProfile(voiceProfileRef.current)
+            audioStreamerRef.current?.setVoiceFilter(settings.voiceFilterEnabled, settings.voiceFilterThreshold)
           }
           setIsAudioStreaming(true)
           addMessage("[Microfone ativado]", "system")
@@ -656,9 +659,9 @@ export default function App() {
         await saveProfile(profileData)
       }
       addMessage("[Perfil de voz treinado e salvo! Filtro avançado ativado.]", "system")
-      if (settings.publicMode && audioStreamerRef.current) {
-        audioStreamerRef.current.setVoiceProfile(voiceProfileRef.current)
-        audioStreamerRef.current.setVoiceFilter(true, settings.voiceFilterThreshold)
+      if (settings.publicMode) {
+        audioStreamerRef.current?.setVoiceProfile(voiceProfileRef.current)
+        audioStreamerRef.current?.setVoiceFilter(true, settings.voiceFilterThreshold)
       }
     } catch (err: any) {
       addMessage("[Erro ao treinar voz: " + err.message + "]", "system")
@@ -672,12 +675,54 @@ export default function App() {
     voiceProfileRef.current.reset()
     setVoiceProfileEnrolled(false)
     await deleteProfile()
-    if (audioStreamerRef.current) {
-      audioStreamerRef.current.setVoiceProfile(null)
-      audioStreamerRef.current.setVoiceFilter(false)
-    }
+    audioStreamerRef.current?.setVoiceProfile(null)
+    audioStreamerRef.current?.setVoiceFilter(false)
     addMessage("[Perfil de voz removido]", "system")
   }, [addMessage])
+
+  const handleTestTimbre = useCallback(async () => {
+    if (isTestingTimbre || !voiceProfileRef.current.isEnrolled) return
+    setIsTestingTimbre(true)
+    setTestTimbreScore(null)
+    setTestTimbreMatch(null)
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      })
+      const audioContext = new AudioContext({ sampleRate: 16000 })
+      const source = audioContext.createMediaStreamSource(stream)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 2048
+      source.connect(analyser)
+
+      const bufferLength = analyser.frequencyBinCount
+      const freqData = new Float32Array(bufferLength) as Float32Array<ArrayBuffer>
+
+      let totalScore = 0
+      let count = 0
+      const duration = 5000
+      const interval = 200
+      const steps = duration / interval
+
+      for (let i = 0; i < steps; i++) {
+        await new Promise((r) => setTimeout(r, interval))
+        analyser.getFloatFrequencyData(freqData)
+        const score = voiceProfileRef.current.getSimilarity(freqData)
+        totalScore += score
+        count++
+        setTestTimbreScore(score)
+        setTestTimbreMatch(score >= settings.voiceFilterThreshold)
+      }
+
+      stream.getTracks().forEach((t) => t.stop())
+      audioContext.close()
+    } catch (err: any) {
+      addMessage("[Erro ao testar timbre: " + err.message + "]", "system")
+    }
+
+    setIsTestingTimbre(false)
+  }, [isTestingTimbre, settings.voiceFilterThreshold, addMessage])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-indigo-50">
@@ -771,6 +816,10 @@ export default function App() {
             trainingProgress={trainingProgress}
             onTrainVoice={handleTrainVoice}
             onResetVoice={handleResetVoice}
+            onTestTimbre={handleTestTimbre}
+            isTestingTimbre={isTestingTimbre}
+            testTimbreScore={testTimbreScore}
+            testTimbreMatch={testTimbreMatch}
           />
         )}
       </AnimatePresence>
