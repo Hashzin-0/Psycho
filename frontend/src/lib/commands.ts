@@ -93,9 +93,9 @@ export const COMMANDS: Command[] = [
     name: "volume",
     aliases: ["vol", "som", "sound", "audio"],
     description: {
-      pt: "Ajusta o volume da voz (1-100). Use '/volume whisper' para modo sussurro (25%)",
-      en: "Adjust voice volume (1-100). Use '/volume whisper' for whisper mode (25%)",
-      es: "Ajusta el volumen de la voz (1-100). Usa '/volume whisper' para modo susurro (25%)",
+      pt: "Ajusta o volume da voz (1-100)",
+      en: "Adjust voice volume (1-100)",
+      es: "Ajusta el volumen de la voz (1-100)",
     },
   },
   {
@@ -141,15 +141,6 @@ export const COMMANDS: Command[] = [
       pt: "Faz uma entrada rápida no diário pessoal",
       en: "Quick journal entry",
       es: "Escribe una entrada rápida en el diario personal",
-    },
-  },
-  {
-    name: "whisper",
-    aliases: ["sussurro", "susurro", "fala baixo", "silêncio", "silêncio", "silencio"],
-    description: {
-      pt: "Ativa o modo sussurro (volume 25%)",
-      en: "Activate whisper mode (volume 25%)",
-      es: "Activa el modo susurro (volumen 25%)",
     },
   },
 ]

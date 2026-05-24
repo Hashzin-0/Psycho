@@ -1,35 +1,20 @@
 import { useState, useRef, useCallback, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GeminiLiveAPI, MultimodalLiveResponseType, type ResponseMessage } from "./lib/geminilive"
-import { AudioStreamer, VideoStreamer, ScreenCapture, AudioPlayer } from "./lib/mediaUtils"
-import { SetVolumeTool, SetWhisperModeTool, ShowNotificationTool } from "./lib/tools"
+import { AudioStreamer, AudioPlayer } from "./lib/mediaUtils"
+import { SetVolumeTool, ShowNotificationTool } from "./lib/tools"
 import { SYSTEM_PROMPT, GREETING_MESSAGES } from "./lib/systemPrompt"
 import { detectCommand, COMMANDS, getHelpText } from "./lib/commands"
 import SettingsModal from "./components/SettingsModal"
 import type { Settings } from "./components/SettingsModal"
-import FloatingButtons from "./components/FloatingButtons"
 import Chat from "./components/Chat"
-import MediaControls from "./components/MediaControls"
 
 const defaultSettings: Settings = {
-  model: "gemini-3.1-flash-live-preview",
-  systemInstructions: SYSTEM_PROMPT,
+  userName: "",
   voice: "Puck",
-  temperature: 0.9,
-  enableGrounding: false,
-  enableWhisper: false,
-  enableThinking: false,
-  enableAlertTool: false,
-  enableCssStyleTool: false,
-  enableInputTranscription: true,
-  enableOutputTranscription: true,
-  disableActivityDetection: false,
-  silenceDuration: 500,
-  prefixPadding: 500,
-  endSpeechSensitivity: "END_SENSITIVITY_UNSPECIFIED",
-  startSpeechSensitivity: "START_SENSITIVITY_UNSPECIFIED",
-  activityHandling: "ACTIVITY_HANDLING_UNSPECIFIED",
+  temperature: 0.7,
   volume: 80,
+  userLang: "pt",
 }
 
 function detectUserLanguage(): string {
@@ -39,43 +24,52 @@ function detectUserLanguage(): string {
   return "en"
 }
 
-function getGreeting(lang: string): string {
-  return GREETING_MESSAGES[lang] || GREETING_MESSAGES["pt"]
+function getGreeting(lang: string, name: string): string {
+  const base = GREETING_MESSAGES[lang] || GREETING_MESSAGES["pt"]
+  if (name.trim()) {
+    const greeting = lang === "pt" ? `Olá, ${name}!` : lang === "es" ? `¡Hola, ${name}!` : `Hello, ${name}!`
+    return `${greeting}\n\n${base.split("\n\n").slice(1).join("\n\n")}`
+  }
+  return base
 }
 
+const WAKE_WORDS = ["psycho", "psico", "psiqui", "psyco"]
+
 export default function App() {
-  const [settings, setSettings] = useState<Settings>(defaultSettings)
+  const [settings, setSettings] = useState<Settings>(() => ({
+    ...defaultSettings,
+    userLang: detectUserLanguage(),
+  }))
   const [connectionStatus, setConnectionStatus] = useState("Desconectado")
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState<{ text: string; type: string }[]>([])
-  const [debugInfo, setDebugInfo] = useState("Pronto para conectar...")
-  const [setupJson, setSetupJson] = useState<string | null>(null)
+  const [debugInfo, setDebugInfo] = useState("Pronto...")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isAudioStreaming, setIsAudioStreaming] = useState(false)
-  const [isVideoStreaming, setIsVideoStreaming] = useState(false)
-  const [isScreenSharing, setIsScreenSharing] = useState(false)
-  const [userLang] = useState(detectUserLanguage)
+  const [isWakeListening, setIsWakeListening] = useState(false)
   const [greetingShown, setGreetingShown] = useState(false)
 
   const clientRef = useRef<GeminiLiveAPI | null>(null)
   const audioStreamerRef = useRef<AudioStreamer | null>(null)
   const audioPlayerRef = useRef<AudioPlayer | null>(null)
-  const videoStreamerRef = useRef<VideoStreamer | null>(null)
-  const screenCaptureRef = useRef<ScreenCapture | null>(null)
-  const videoPreviewRef = useRef<HTMLVideoElement | null>(null)
-  const preWhisperVolumeRef = useRef(80)
-
-  useEffect(() => {
-    if (settings.enableWhisper) {
-      preWhisperVolumeRef.current = settings.volume > 25 ? settings.volume : 80
-      updateVolume(25)
-    } else if (settings.volume === 25 && !settings.enableWhisper) {
-      updateVolume(preWhisperVolumeRef.current)
-    }
-  }, [settings.enableWhisper])
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const lastOutputRef = useRef("")
 
   const addMessage = useCallback((text: string, type: string) => {
     setMessages((prev) => [...prev, { text, type }])
+  }, [])
+
+  const updateLastAssistantMessage = useCallback((text: string) => {
+    setMessages((prev) => {
+      const copy = [...prev]
+      for (let i = copy.length - 1; i >= 0; i--) {
+        if (copy[i].type === "assistant") {
+          copy[i] = { ...copy[i], text }
+          return copy
+        }
+      }
+      return [...prev, { text, type: "assistant" }]
+    })
   }, [])
 
   const updateDebug = useCallback((text: string) => {
@@ -84,29 +78,10 @@ export default function App() {
 
   const handleVolumeChange = useCallback((level: number) => {
     const clamped = Math.max(1, Math.min(100, level))
-    updateVolume(clamped)
-    if (clamped <= 30) {
-      clientRef.current?.setWhisperMode(true)
-      setSettings((s) => ({ ...s, enableWhisper: true }))
-    } else if (clamped > 30 && settings.enableWhisper) {
-      clientRef.current?.setWhisperMode(false)
-      setSettings((s) => ({ ...s, enableWhisper: false }))
-    }
+    audioPlayerRef.current?.setVolume(clamped / 100)
+    setSettings((s) => ({ ...s, volume: clamped }))
     addMessage(`[Volume ajustado para ${clamped}% pelo Psycho]`, "system")
-  }, [addMessage, settings.enableWhisper])
-
-  const handleWhisperToggle = useCallback((enabled: boolean) => {
-    clientRef.current?.setWhisperMode(enabled)
-    setSettings((s) => ({ ...s, enableWhisper: enabled }))
-    if (enabled) {
-      preWhisperVolumeRef.current = settings.volume
-      updateVolume(25)
-      addMessage("[Psycho ativou o modo sussurro 💜]", "system")
-    } else {
-      updateVolume(preWhisperVolumeRef.current)
-      addMessage("[Psycho voltou ao volume normal]", "system")
-    }
-  }, [addMessage, settings.volume])
+  }, [addMessage])
 
   const processCommand = useCallback((cmdName: string, args: string) => {
     const cmd = COMMANDS.find((c) => c.name === cmdName || c.aliases.includes(cmdName))
@@ -116,30 +91,25 @@ export default function App() {
 
     switch (cmd.name) {
       case "help":
-        addMessage(getHelpText(userLang), "assistant")
+        addMessage(getHelpText(settings.userLang), "assistant")
         break
       case "clear":
         setMessages([])
         addMessage("[Conversa limpa]", "system")
         break
-      case "whisper":
       case "volume":
-        if (args.toLowerCase().includes("whisper") || args.toLowerCase().includes("sussurro") || args.toLowerCase().includes("susurro") || args.toLowerCase().includes("baixo")) {
-          handleWhisperToggle(true)
+        const vol = parseInt(args)
+        if (!isNaN(vol) && vol >= 1 && vol <= 100) {
+          handleVolumeChange(vol)
         } else {
-          const vol = parseInt(args)
-          if (!isNaN(vol) && vol >= 1 && vol <= 100) {
-            handleVolumeChange(vol)
-          } else {
-            addMessage("💡 Use `/volume whisper` para modo sussurro (25%) ou `/volume 50` para definir um valor específico (1-100).", "assistant")
-          }
+          addMessage("💡 Use `/volume 50` para definir o volume (1-100).", "assistant")
         }
         break
       default:
         addMessage(`Comando **/${cmd.name}** reconhecido!`, "assistant")
         break
     }
-  }, [addMessage, userLang, handleWhisperToggle, handleVolumeChange])
+  }, [addMessage, handleVolumeChange, settings.userLang])
 
   const handleMessage = useCallback(
     (message: ResponseMessage) => {
@@ -159,14 +129,18 @@ export default function App() {
           break
 
         case MultimodalLiveResponseType.OUTPUT_TRANSCRIPTION:
-          if (!message.data.finished) addMessage(message.data.text, "assistant")
+          if (message.data.text) {
+            lastOutputRef.current = message.data.text
+            updateLastAssistantMessage(message.data.text + "…")
+          }
+          if (message.data.finished && lastOutputRef.current) {
+            updateLastAssistantMessage(lastOutputRef.current)
+            lastOutputRef.current = ""
+          }
           break
 
         case MultimodalLiveResponseType.SETUP_COMPLETE:
           addMessage("Psycho conectado! 💜", "system")
-          if (clientRef.current?.lastSetupMessage) {
-            setSetupJson(JSON.stringify(clientRef.current.lastSetupMessage, null, 2))
-          }
           break
 
         case MultimodalLiveResponseType.TOOL_CALL: {
@@ -186,18 +160,21 @@ export default function App() {
 
         case MultimodalLiveResponseType.TURN_COMPLETE:
           updateDebug("Turno completo")
+          lastOutputRef.current = ""
           break
 
         case MultimodalLiveResponseType.INTERRUPTED:
           addMessage("[Interrompido]", "system")
           audioPlayerRef.current?.interrupt()
+          lastOutputRef.current = ""
           break
       }
     },
-    [addMessage, updateDebug]
+    [addMessage, updateDebug, updateLastAssistantMessage]
   )
 
   const connect = useCallback(async () => {
+    if (clientRef.current) return
     try {
       setConnectionStatus("Obtendo token...")
       const response = await fetch("/api/token", { method: "POST" })
@@ -205,28 +182,17 @@ export default function App() {
       const { token } = await response.json()
 
       setConnectionStatus("Conectando ao Psycho...")
-      const client = new GeminiLiveAPI(token, settings.model)
+      const client = new GeminiLiveAPI(token, "gemini-3.1-flash-live-preview")
 
-      client.baseSystemInstructions = settings.systemInstructions
-      client.systemInstructions = settings.systemInstructions
-      client.inputAudioTranscription = settings.enableInputTranscription
-      client.outputAudioTranscription = settings.enableOutputTranscription
-      client.googleGrounding = settings.enableGrounding
+      client.baseSystemInstructions = SYSTEM_PROMPT
+      client.systemInstructions = SYSTEM_PROMPT
+      client.inputAudioTranscription = true
+      client.outputAudioTranscription = true
       client.responseModalities = ["AUDIO"]
       client.voiceName = settings.voice
       client.temperature = settings.temperature
 
-      client.automaticActivityDetection = {
-        disabled: settings.disableActivityDetection,
-        silence_duration_ms: settings.silenceDuration,
-        prefix_padding_ms: settings.prefixPadding,
-        end_of_speech_sensitivity: settings.endSpeechSensitivity,
-        start_of_speech_sensitivity: settings.startSpeechSensitivity,
-      }
-      client.activityHandling = settings.activityHandling
-
       client.addFunction(new SetVolumeTool(handleVolumeChange))
-      client.addFunction(new SetWhisperModeTool(handleWhisperToggle))
       client.addFunction(new ShowNotificationTool())
 
       client.onReceiveResponse = handleMessage
@@ -237,53 +203,63 @@ export default function App() {
       client.onClose = () => {
         setConnectionStatus("Desconectado")
         setIsConnected(false)
-        disconnect()
+        clientRef.current = null
+        stopWakeListening()
       }
       client.onOpen = () => {
         setConnectionStatus("Conectado")
         setIsConnected(true)
-        if (settings.enableWhisper) client.setWhisperMode(true)
-        if (settings.enableThinking) client.setThinkingMode(true)
+        if (isWakeListening) stopWakeListening()
         if (!greetingShown) {
-          addMessage(getGreeting(userLang), "assistant")
+          addMessage(getGreeting(settings.userLang, settings.userName), "assistant")
           setGreetingShown(true)
         }
+        startAudioStreaming()
       }
 
       clientRef.current = client
       client.connect()
 
-      audioStreamerRef.current = new AudioStreamer(client)
-      videoStreamerRef.current = new VideoStreamer(client)
-      screenCaptureRef.current = new ScreenCapture(client)
       audioPlayerRef.current = new AudioPlayer()
       await audioPlayerRef.current.init()
 
-      updateDebug("Psycho conectado com sucesso")
+      updateDebug("Psycho conectado")
     } catch (error: any) {
-      setConnectionStatus("Falha na conexão: " + error.message)
+      setConnectionStatus("Falha: " + error.message)
       updateDebug("Erro: " + error.message)
     }
-  }, [settings, handleMessage, updateDebug, handleVolumeChange, handleWhisperToggle, greetingShown, userLang, addMessage])
+  }, [settings, handleMessage, updateDebug, handleVolumeChange, greetingShown, addMessage, isWakeListening])
 
   const disconnect = useCallback(() => {
     clientRef.current?.webSocket?.close()
     clientRef.current = null
     audioStreamerRef.current?.stop()
-    videoStreamerRef.current?.stop()
-    screenCaptureRef.current?.stop()
     audioPlayerRef.current?.destroy()
     setIsAudioStreaming(false)
-    setIsVideoStreaming(false)
-    setIsScreenSharing(false)
     setConnectionStatus("Desconectado")
     setIsConnected(false)
+    stopWakeListening()
   }, [])
+
+  const startAudioStreaming = useCallback(async () => {
+    try {
+      if (!audioStreamerRef.current && clientRef.current) {
+        audioStreamerRef.current = new AudioStreamer(clientRef.current)
+      }
+      if (audioStreamerRef.current) {
+        await audioStreamerRef.current.start()
+        setIsAudioStreaming(true)
+        addMessage("[Microfone ativado automaticamente]", "system")
+      }
+    } catch (err: any) {
+      addMessage("[Erro ao ativar microfone: " + err.message + "]", "system")
+    }
+  }, [addMessage])
 
   const toggleAudio = useCallback(async () => {
     if (!isAudioStreaming) {
       try {
-        if (audioStreamerRef.current) {
+        if (audioStreamerRef.current && clientRef.current) {
           await audioStreamerRef.current.start()
           setIsAudioStreaming(true)
           addMessage("[Microfone ativado]", "system")
@@ -298,66 +274,61 @@ export default function App() {
     }
   }, [isAudioStreaming, addMessage])
 
-  const toggleVideo = useCallback(async () => {
-    if (!isVideoStreaming) {
-      try {
-        if (videoStreamerRef.current) {
-          const video = await videoStreamerRef.current.start()
-          if (videoPreviewRef.current && video) {
-            videoPreviewRef.current.srcObject = video.srcObject
-            videoPreviewRef.current.hidden = false
-          }
-          setIsVideoStreaming(true)
-          addMessage("[Câmera ativada]", "system")
-        }
-      } catch (err: any) {
-        addMessage("[Erro de vídeo: " + err.message + "]", "system")
-      }
-    } else {
-      videoStreamerRef.current?.stop()
-      setIsVideoStreaming(false)
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = null
-        videoPreviewRef.current.hidden = true
-      }
-      addMessage("[Câmera desativada]", "system")
+  const startWakeListening = useCallback(() => {
+    if (isConnected || isWakeListening) return
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      updateDebug("Wake word não suportado neste navegador")
+      return
     }
-  }, [isVideoStreaming, addMessage])
+    try {
+      const recognition = new SpeechRecognition()
+      recognition.lang = "pt-BR"
+      recognition.continuous = true
+      recognition.interimResults = true
+      recognition.maxAlternatives = 3
 
-  const toggleScreen = useCallback(async () => {
-    if (!isScreenSharing) {
-      if (!navigator.mediaDevices?.getDisplayMedia) {
-        addMessage("[Compartilhamento de tela não disponível: requer HTTPS ou localhost]", "system")
-        return
-      }
-      try {
-        if (screenCaptureRef.current) {
-          const video = await screenCaptureRef.current.start()
-          if (videoPreviewRef.current && video) {
-            videoPreviewRef.current.srcObject = video.srcObject
-            videoPreviewRef.current.hidden = false
+      recognition.onresult = (event: SpeechRecognitionEvent) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript.toLowerCase().trim()
+          if (WAKE_WORDS.some((w) => transcript.includes(w))) {
+            addMessage("[Palavra de ativação detectada: Psycho]", "system")
+            recognition.stop()
+            setIsWakeListening(false)
+            connect()
+            return
           }
-          setIsScreenSharing(true)
-          addMessage("[Compartilhamento de tela ativado]", "system")
         }
-      } catch (err: any) {
-        addMessage("[Erro ao compartilhar tela: " + err.message + "]", "system")
       }
-    } else {
-      screenCaptureRef.current?.stop()
-      setIsScreenSharing(false)
-      if (!isVideoStreaming && videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = null
-        videoPreviewRef.current.hidden = true
-      }
-      addMessage("[Compartilhamento de tela desativado]", "system")
-    }
-  }, [isScreenSharing, isVideoStreaming, addMessage])
 
-  const updateVolume = useCallback((vol: number) => {
-    audioPlayerRef.current?.setVolume(vol / 100)
-    setSettings((s) => ({ ...s, volume: vol }))
-  }, [])
+      recognition.onerror = () => {
+        setIsWakeListening(false)
+        setTimeout(() => startWakeListening(), 3000)
+      }
+
+      recognition.onend = () => {
+        if (isWakeListening && !isConnected) {
+          setTimeout(() => startWakeListening(), 1000)
+        }
+      }
+
+      recognitionRef.current = recognition
+      setIsWakeListening(true)
+      recognition.start()
+      updateDebug("Ouvindo palavra de ativação...")
+    } catch {
+      updateDebug("Erro ao iniciar wake word")
+    }
+  }, [isConnected, isWakeListening, addMessage, connect, updateDebug])
+
+  const stopWakeListening = useCallback(() => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop() } catch {}
+      recognitionRef.current = null
+    }
+    setIsWakeListening(false)
+    if (!isConnected) updateDebug("Pronto...")
+  }, [isConnected, updateDebug])
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -381,28 +352,13 @@ export default function App() {
   const updateSetting = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
       setSettings((prev) => ({ ...prev, [key]: value }))
-
-      const c = clientRef.current
-      if (!c?.connected) return
-
-      switch (key) {
-        case "enableWhisper":
-          c.setWhisperMode(value as boolean)
-          if (value as boolean) {
-            handleWhisperToggle(true)
-          } else {
-            handleWhisperToggle(false)
-          }
-          break
-        case "enableThinking":
-          c.setThinkingMode(value as boolean)
-          break
-        case "voice":
-          c.setVoice(value as string)
-          break
+      if (key === "voice" || key === "temperature") {
+        const c = clientRef.current
+        if (!c?.connected) return
+        if (key === "voice") c.setVoice(value as string)
       }
     },
-    [handleWhisperToggle]
+    []
   )
 
   useEffect(() => {
@@ -436,91 +392,98 @@ export default function App() {
             </motion.div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Psycho</h1>
-              <p className="text-sm text-violet-200 font-light">Seu Assistente Psicológico Pessoal</p>
+              <p className="text-sm text-violet-200 font-light">
+                {isWakeListening
+                  ? "🎤 Ouvindo... diga 'Psycho'"
+                  : "Seu Assistente Psicológico Pessoal"}
+              </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={connect}
-              disabled={isConnected}
-              className="px-5 py-2 rounded-xl text-sm font-medium bg-white text-psycho-700 hover:bg-violet-50 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors"
-            >
-              {isConnected ? "Conectado" : "Conectar"}
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={disconnect}
-              disabled={!isConnected}
-              className="px-5 py-2 rounded-xl text-sm font-medium bg-red-500/90 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors backdrop-blur-sm"
-            >
-              Desconectar
-            </motion.button>
+          <div className="flex items-center gap-2">
+            {!isConnected ? (
+              <>
+                {!isWakeListening && (
+                  <motion.button
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={startWakeListening}
+                    className="px-4 py-2 rounded-xl text-sm font-medium bg-psycho-500/30 text-white hover:bg-psycho-500/50 transition-colors backdrop-blur-sm border border-white/10"
+                  >
+                    🎤 Ativar Voz
+                  </motion.button>
+                )}
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={connect}
+                  className="px-4 py-2 rounded-xl text-sm font-medium bg-white text-psycho-700 hover:bg-violet-50 shadow-sm transition-colors"
+                >
+                  Conectar
+                </motion.button>
+              </>
+            ) : (
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={disconnect}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500/90 text-white hover:bg-red-600 transition-colors backdrop-blur-sm"
+              >
+                Desconectar
+              </motion.button>
+            )}
           </div>
         </div>
       </motion.header>
 
       {/* Main content */}
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-        {/* Setup JSON (collapsible) */}
-        <AnimatePresence>
-          {setupJson && (
-            <motion.details
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-sm border border-violet-100 p-4"
-            >
-              <summary className="text-xs font-semibold uppercase tracking-wider text-violet-500 cursor-pointer select-none">
-                Configuração da Sessão (JSON)
-              </summary>
-              <pre className="mt-2 text-xs text-violet-400 overflow-x-auto whitespace-pre-wrap">
-                {setupJson}
-              </pre>
-            </motion.details>
-          )}
-        </AnimatePresence>
-
         {/* Chat */}
         <Chat messages={messages} onSend={sendMessage} />
 
-        {/* Media Controls */}
-        <MediaControls
-          isAudioStreaming={isAudioStreaming}
-          isVideoStreaming={isVideoStreaming}
-          isScreenSharing={isScreenSharing}
-          volume={settings.volume}
-          connectionStatus={connectionStatus}
-          isConnected={isConnected}
-          onToggleAudio={toggleAudio}
-          onToggleVideo={toggleVideo}
-          onToggleScreen={toggleScreen}
-          onVolumeChange={updateVolume}
-          videoPreviewRef={videoPreviewRef}
-        />
-
-        {/* Debug */}
+        {/* Status + Settings */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white/70 backdrop-blur-sm rounded-2xl shadow-sm border border-violet-100 p-4"
+          className="flex items-center justify-between bg-white/70 backdrop-blur-sm rounded-2xl shadow-sm border border-violet-100 p-4"
         >
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500 mb-2">
-            Diagnóstico
-          </h3>
-          <pre className="text-xs text-violet-400 font-mono">{debugInfo}</pre>
+          <div className="flex items-center gap-3">
+            <span className={`inline-block w-2 h-2 rounded-full ${
+              isConnected ? "bg-emerald-400 animate-pulse" : isWakeListening ? "bg-amber-400 animate-pulse" : "bg-slate-300"
+            }`} />
+            <span className="text-xs font-medium text-slate-500">{connectionStatus}</span>
+            {settings.userName && (
+              <span className="text-xs text-slate-400 border-l border-slate-200 pl-2">
+                {settings.userName}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {isConnected && (
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={toggleAudio}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  isAudioStreaming
+                    ? "bg-emerald-100 text-emerald-700"
+                    : "bg-white text-slate-600 border border-slate-200 hover:bg-violet-50"
+                }`}
+              >
+                {isAudioStreaming ? "🎤 Mic ON" : "🎤 Mic OFF"}
+              </motion.button>
+            )}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setSettingsOpen(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-600 border border-slate-200 hover:bg-violet-50 transition-all"
+            >
+              ⚙️
+            </motion.button>
+          </div>
         </motion.div>
-      </main>
 
-      {/* Floating Buttons */}
-      <FloatingButtons
-        isAudioStreaming={isAudioStreaming}
-        isConnected={isConnected}
-        onToggleAudio={toggleAudio}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
+        {/* Debug info (hidden from normal users) */}
+        {/* <pre className="text-xs text-violet-400">{debugInfo}</pre> */}
+      </main>
 
       {/* Settings Modal */}
       <AnimatePresence>
