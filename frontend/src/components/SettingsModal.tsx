@@ -12,6 +12,7 @@ export interface Settings {
   autoGainControl: boolean
   wakeWordEnabled: boolean
   publicMode: boolean
+  publicModeSensitivity: number
 }
 
 interface Props {
@@ -284,6 +285,28 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                 label={lang === "pt" ? "Cancelamento Público" : lang === "es" ? "Cancelación Pública" : "Public Mode"}
                 desc={lang === "pt" ? "Apenas sua voz pode interromper o Psycho — vozes de fundo são ignoradas" : lang === "es" ? "Solo tu voz interrumpe a Psycho — las voces de fondo se ignoran" : "Only your voice can interrupt Psycho — background voices are ignored"}
               />
+              {settings.publicMode && (
+                <div className="pt-2 border-t border-violet-200/50">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[11px] font-medium text-slate-500">
+                      {lang === "pt" ? "Sensibilidade do Filtro" : lang === "es" ? "Sensibilidad del Filtro" : "Filter Sensitivity"}
+                    </span>
+                    <span className="text-sm font-semibold text-psycho-600">{settings.publicModeSensitivity}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    value={settings.publicModeSensitivity}
+                    onChange={(e) => onChange("publicModeSensitivity", parseInt(e.target.value))}
+                    className="w-full accent-psycho-600"
+                  />
+                  <div className="flex justify-between text-[9px] text-slate-400 mt-0.5">
+                    <span>{lang === "pt" ? "Menos rígido" : lang === "es" ? "Menos estricto" : "Lenient"}</span>
+                    <span>{lang === "pt" ? "Máximo (só você)" : lang === "es" ? "Máximo (solo tú)" : "Maximum (only you)"}</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

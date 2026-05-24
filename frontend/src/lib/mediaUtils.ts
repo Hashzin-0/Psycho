@@ -14,14 +14,21 @@ export class AudioStreamer {
   private mediaStream: MediaStream | null = null
   isStreaming = false
   private sampleRate = 16000
+  private publicMode = false
+  private energyThreshold = 0
+  private isCalibrating = false
+  private calibrationSamples: number[] = []
+  private calibrationTimer: ReturnType<typeof setTimeout> | null = null
+  private chunkSize = 512
 
   constructor(client: GeminiLiveAPI) {
     this.client = client
   }
 
-  async start(opts?: { deviceId?: string; constraints?: AudioConstraints; publicMode?: boolean }) {
+  async start(opts?: { deviceId?: string; constraints?: AudioConstraints; publicMode?: boolean; publicModeSensitivity?: number }) {
     const c = opts?.constraints || {}
     const publicMode = opts?.publicMode || false
+    this.publicMode = publicMode
     const audioConstraints: MediaTrackConstraints = {
       sampleRate: c.sampleRate || this.sampleRate,
       echoCancellation: publicMode ? true : (c.echoCancellation !== undefined ? c.echoCancellation : true),
@@ -40,10 +47,25 @@ export class AudioStreamer {
 
     this.audioWorklet = new AudioWorkletNode(this.audioContext, "audio-capture-processor")
 
+    if (this.publicMode) {
+      this.startCalibration(opts?.publicModeSensitivity ?? 5)
+    }
+
     this.audioWorklet.port.onmessage = (event) => {
       if (!this.isStreaming) return
       if (event.data.type === "audio") {
-        const pcmData = this.convertToPCM16(event.data.data)
+        const float32Data = event.data.data
+
+        if (this.publicMode) {
+          const rms = this.calculateRMS(float32Data)
+          if (this.isCalibrating) {
+            this.calibrationSamples.push(rms)
+          } else if (this.energyThreshold > 0 && rms < this.energyThreshold) {
+            return
+          }
+        }
+
+        const pcmData = this.convertToPCM16(float32Data)
         const base64Audio = this.arrayBufferToBase64(pcmData)
         if (this.client.connected) {
           this.client.sendAudioMessage(base64Audio)
@@ -54,6 +76,60 @@ export class AudioStreamer {
     const source = this.audioContext.createMediaStreamSource(this.mediaStream)
     source.connect(this.audioWorklet)
     this.isStreaming = true
+  }
+
+  setPublicMode(enabled: boolean, sensitivity?: number) {
+    this.publicMode = enabled
+    if (enabled) {
+      this.startCalibration(sensitivity ?? 5)
+    } else {
+      this.cancelCalibration()
+      this.energyThreshold = 0
+    }
+  }
+
+  private startCalibration(sensitivity: number) {
+    this.cancelCalibration()
+    this.isCalibrating = true
+    this.calibrationSamples = []
+    this.energyThreshold = 0
+    this.calibrationTimer = setTimeout(() => {
+      this.finishCalibration(sensitivity)
+    }, 2000)
+  }
+
+  private cancelCalibration() {
+    if (this.calibrationTimer !== null) {
+      clearTimeout(this.calibrationTimer)
+      this.calibrationTimer = null
+    }
+    this.isCalibrating = false
+    this.calibrationSamples = []
+  }
+
+  private finishCalibration(sensitivity: number) {
+    this.calibrationTimer = null
+    this.isCalibrating = false
+
+    if (this.calibrationSamples.length === 0) {
+      this.energyThreshold = 0.015
+      return
+    }
+
+    const sorted = [...this.calibrationSamples].sort((a, b) => a - b)
+    const noiseFloor = sorted[Math.floor(sorted.length * 0.2)] || 0.001
+    const maxRMS = sorted[sorted.length - 1] || noiseFloor
+
+    const multiplier = 3 + (sensitivity - 1) * (12 / 9)
+    this.energyThreshold = Math.max(noiseFloor * multiplier, maxRMS * 0.25, 0.008)
+  }
+
+  private calculateRMS(data: Float32Array): number {
+    let sumSquares = 0
+    for (let i = 0; i < data.length; i++) {
+      sumSquares += data[i] * data[i]
+    }
+    return Math.sqrt(sumSquares / data.length)
   }
 
   stop() {

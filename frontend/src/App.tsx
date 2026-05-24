@@ -22,6 +22,7 @@ const defaultSettings: Settings = {
   autoGainControl: true,
   wakeWordEnabled: false,
   publicMode: false,
+  publicModeSensitivity: 5,
 }
 
 function detectUserLanguage(): string {
@@ -228,8 +229,11 @@ export default function App() {
       setConnectionStatus("Conectando ao Psycho...")
       const client = new GeminiLiveAPI(token, "gemini-3.1-flash-live-preview")
 
+      const nameContext = settings.userName.trim()
+        ? `\n\nThe user's name is "${settings.userName.trim()}". Always address them by this name naturally — use it in greetings, questions, and throughout the conversation. Respond as if you know them personally.`
+        : ""
       client.baseSystemInstructions = SYSTEM_PROMPT
-      client.systemInstructions = SYSTEM_PROMPT
+      client.systemInstructions = SYSTEM_PROMPT + nameContext
       client.inputAudioTranscription = true
       client.outputAudioTranscription = true
       client.responseModalities = ["AUDIO"]
@@ -311,6 +315,7 @@ export default function App() {
       if (audioStreamerRef.current) {
         await audioStreamerRef.current.start({
           publicMode: settings.publicMode,
+          publicModeSensitivity: settings.publicModeSensitivity,
           constraints: {
             noiseSuppression: settings.noiseCancellation,
             echoCancellation: settings.echoCancellation,
@@ -334,6 +339,7 @@ export default function App() {
         if (audioStreamerRef.current) {
           await audioStreamerRef.current.start({
             publicMode: settings.publicMode,
+            publicModeSensitivity: settings.publicModeSensitivity,
             constraints: {
               noiseSuppression: settings.noiseCancellation,
               echoCancellation: settings.echoCancellation,
@@ -380,11 +386,19 @@ export default function App() {
         const c = clientRef.current
         if (c?.connected) c.setVoice(value as string)
       }
+      if (key === "publicMode") {
+        const c = clientRef.current
+        if (c?.connected) c.setPublicMode(value as boolean)
+        audioStreamerRef.current?.setPublicMode(value as boolean, settings.publicModeSensitivity)
+      }
+      if (key === "publicModeSensitivity" && settings.publicMode) {
+        audioStreamerRef.current?.setPublicMode(true, value as number)
+      }
       if (["noiseCancellation", "echoCancellation", "autoGainControl"].includes(key as string)) {
         prefsChangedRef.current = true
       }
     },
-    []
+    [settings.publicMode]
   )
 
   useEffect(() => {
