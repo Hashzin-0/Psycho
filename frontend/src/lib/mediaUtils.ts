@@ -19,13 +19,14 @@ export class AudioStreamer {
     this.client = client
   }
 
-  async start(opts?: { deviceId?: string; constraints?: AudioConstraints }) {
+  async start(opts?: { deviceId?: string; constraints?: AudioConstraints; publicMode?: boolean }) {
     const c = opts?.constraints || {}
+    const publicMode = opts?.publicMode || false
     const audioConstraints: MediaTrackConstraints = {
       sampleRate: c.sampleRate || this.sampleRate,
-      echoCancellation: c.echoCancellation !== undefined ? c.echoCancellation : true,
-      noiseSuppression: c.noiseSuppression !== undefined ? c.noiseSuppression : true,
-      autoGainControl: c.autoGainControl !== undefined ? c.autoGainControl : true,
+      echoCancellation: publicMode ? true : (c.echoCancellation !== undefined ? c.echoCancellation : true),
+      noiseSuppression: publicMode ? true : (c.noiseSuppression !== undefined ? c.noiseSuppression : true),
+      autoGainControl: publicMode ? true : (c.autoGainControl !== undefined ? c.autoGainControl : true),
     }
     if (opts?.deviceId) {
       audioConstraints.deviceId = { exact: opts.deviceId }

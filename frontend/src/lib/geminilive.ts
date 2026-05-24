@@ -134,6 +134,38 @@ export class GeminiLiveAPI {
 
   activityHandling = "ACTIVITY_HANDLING_UNSPECIFIED"
 
+  setPublicMode(enabled: boolean) {
+    if (enabled) {
+      this.automaticActivityDetection = {
+        ...this.automaticActivityDetection,
+        silence_duration_ms: 3000,
+        end_of_speech_sensitivity: "END_SENSITIVITY_LOW",
+        start_of_speech_sensitivity: "START_SENSITIVITY_LOW",
+      }
+    } else {
+      this.automaticActivityDetection = {
+        ...this.automaticActivityDetection,
+        silence_duration_ms: 2000,
+        end_of_speech_sensitivity: "END_SENSITIVITY_UNSPECIFIED",
+        start_of_speech_sensitivity: "START_SENSITIVITY_UNSPECIFIED",
+      }
+    }
+    if (this.connected) {
+      this.sendSessionUpdate({
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            disabled: this.automaticActivityDetection.disabled,
+            silenceDurationMs: this.automaticActivityDetection.silence_duration_ms,
+            prefixPaddingMs: this.automaticActivityDetection.prefix_padding_ms,
+            endOfSpeechSensitivity: this.automaticActivityDetection.end_of_speech_sensitivity,
+            startOfSpeechSensitivity: this.automaticActivityDetection.start_of_speech_sensitivity,
+          },
+          activityHandling: this.activityHandling,
+        },
+      })
+    }
+  }
+
   serviceUrl: string
   connected = false
   webSocket: WebSocket | null = null

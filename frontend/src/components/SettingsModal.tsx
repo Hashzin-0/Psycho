@@ -1,4 +1,5 @@
 import { motion } from "framer-motion"
+import { useState, useRef, useEffect } from "react"
 
 export interface Settings {
   userName: string
@@ -9,6 +10,8 @@ export interface Settings {
   noiseCancellation: boolean
   echoCancellation: boolean
   autoGainControl: boolean
+  wakeWordEnabled: boolean
+  publicMode: boolean
 }
 
 interface Props {
@@ -54,9 +57,58 @@ function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange
 }
 
 export default function SettingsModal({ open, settings, onClose, onChange }: Props) {
+  const [testTranscript, setTestTranscript] = useState<string | null>(null)
+  const [testConfidence, setTestConfidence] = useState<number | null>(null)
+  const [isTesting, setIsTesting] = useState(false)
+  const testRecognitionRef = useRef<SpeechRecognition | null>(null)
+
+  useEffect(() => {
+    return () => {
+      testRecognitionRef.current?.abort()
+      testRecognitionRef.current = null
+    }
+  }, [])
+
   if (!open) return null
 
   const lang = settings.userLang as "pt" | "en" | "es"
+
+  const handleVoiceTest = () => {
+    if (isTesting) return
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognitionAPI) {
+      setTestTranscript("❌ " + (lang === "pt" ? "Não suportado neste navegador" : lang === "es" ? "No compatible" : "Not supported in this browser"))
+      return
+    }
+    setIsTesting(true)
+    setTestTranscript(lang === "pt" ? "🎤 Ouvindo..." : lang === "es" ? "🎤 Escuchando..." : "🎤 Listening...")
+    setTestConfidence(null)
+
+    const recognition = new SpeechRecognitionAPI()
+    recognition.continuous = false
+    recognition.interimResults = true
+    recognition.lang = "pt-BR"
+    recognition.maxAlternatives = 3
+
+    recognition.onresult = (event) => {
+      const last = event.results[event.results.length - 1]
+      const alt = last[0]
+      setTestTranscript(alt.transcript)
+      setTestConfidence(Math.round(alt.confidence * 100))
+    }
+
+    recognition.onerror = () => {
+      setTestTranscript("❌ " + (lang === "pt" ? "Erro ao capturar áudio" : lang === "es" ? "Error de audio" : "Audio error"))
+      setIsTesting(false)
+    }
+
+    recognition.onend = () => {
+      setIsTesting(false)
+    }
+
+    recognition.start()
+    testRecognitionRef.current = recognition
+  }
 
   return (
     <motion.div
@@ -211,6 +263,68 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                 label={lang === "pt" ? "Controle Automático de Ganho" : lang === "es" ? "Control Automático de Ganancia" : "Auto Gain Control"}
                 desc={lang === "pt" ? "Ajusta automaticamente o volume do microfone" : lang === "es" ? "Ajusta automáticamente el volumen del micrófono" : "Automatically adjusts microphone volume"}
               />
+            </div>
+          </div>
+
+          {/* Ativação por Voz */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+              {lang === "pt" ? "Ativação por Voz" : lang === "es" ? "Activación por Voz" : "Voice Activation"}
+            </label>
+            <div className="space-y-3 bg-violet-50/70 rounded-2xl p-4 border border-violet-100">
+              <Toggle
+                checked={settings.wakeWordEnabled}
+                onChange={(v) => onChange("wakeWordEnabled", v)}
+                label={lang === "pt" ? "Wake Word (\"Psycho\")" : lang === "es" ? "Palabra de Activación" : "Wake Word"}
+                desc={lang === "pt" ? "Diga \"Psycho\" seguido da sua mensagem para ativar o Psycho automaticamente" : lang === "es" ? "Di \"Psycho\" seguido de tu mensaje para activar Psycho" : "Say \"Psycho\" followed by your message to activate Psycho automatically"}
+              />
+              <Toggle
+                checked={settings.publicMode}
+                onChange={(v) => onChange("publicMode", v)}
+                label={lang === "pt" ? "Cancelamento Público" : lang === "es" ? "Cancelación Pública" : "Public Mode"}
+                desc={lang === "pt" ? "Apenas sua voz pode interromper o Psycho — vozes de fundo são ignoradas" : lang === "es" ? "Solo tu voz interrumpe a Psycho — las voces de fondo se ignoran" : "Only your voice can interrupt Psycho — background voices are ignored"}
+              />
+            </div>
+          </div>
+
+          {/* Treinamento de Voz */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+              {lang === "pt" ? "Treinamento de Voz" : lang === "es" ? "Entrenamiento de Voz" : "Voice Training"}
+            </label>
+            <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 space-y-3">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {lang === "pt"
+                  ? "O navegador se adapta naturalmente ao seu sotaque através da API de Reconhecimento de Fala. Quanto mais você usar, melhor fica o reconhecimento."
+                  : lang === "es"
+                  ? "El navegador se adapta naturalmente a tu acento mediante la API de Reconocimiento de Voz. Cuanto más lo uses, mejor será el reconocimiento."
+                  : "The browser naturally adapts to your accent through the Speech Recognition API. The more you use it, the better the recognition gets."}
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleVoiceTest}
+                  disabled={isTesting}
+                  className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
+                    isTesting
+                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      : "bg-psycho-100 text-psycho-700 hover:bg-psycho-200 border border-psycho-200"
+                  }`}
+                >
+                  {isTesting
+                    ? (lang === "pt" ? "Testando..." : lang === "es" ? "Probando..." : "Testing...")
+                    : (lang === "pt" ? "🔍 Testar Reconhecimento" : lang === "es" ? "🔍 Probar Reconocimiento" : "🔍 Test Recognition")}
+                </button>
+                {testTranscript && (
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-slate-700 truncate">{testTranscript}</p>
+                    {testConfidence !== null && (
+                      <p className="text-[10px] text-slate-400">
+                        {lang === "pt" ? "Confiança" : lang === "es" ? "Confianza" : "Confidence"}: {testConfidence}%
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

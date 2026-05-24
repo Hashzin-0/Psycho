@@ -9,6 +9,8 @@ import SettingsModal from "./components/SettingsModal"
 import type { Settings } from "./components/SettingsModal"
 import Chat from "./components/Chat"
 
+const WAKE_WORDS = ["psycho", "psico", "psyco"]
+
 const defaultSettings: Settings = {
   userName: "",
   voice: "Puck",
@@ -18,6 +20,8 @@ const defaultSettings: Settings = {
   noiseCancellation: true,
   echoCancellation: true,
   autoGainControl: true,
+  wakeWordEnabled: false,
+  publicMode: false,
 }
 
 function detectUserLanguage(): string {
@@ -48,12 +52,17 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isAudioStreaming, setIsAudioStreaming] = useState(false)
   const [greetingShown, setGreetingShown] = useState(false)
+  const [isWakeListening, setIsWakeListening] = useState(false)
 
   const clientRef = useRef<GeminiLiveAPI | null>(null)
   const audioStreamerRef = useRef<AudioStreamer | null>(null)
   const audioPlayerRef = useRef<AudioPlayer | null>(null)
   const lastOutputRef = useRef("")
   const prefsChangedRef = useRef(false)
+  const wakeRecognitionRef = useRef<SpeechRecognition | null>(null)
+  const wakePendingTextRef = useRef("")
+  const isConnectingRef = useRef(false)
+  const connectRef = useRef<() => Promise<void> | undefined>(undefined)
 
   const addMessage = useCallback((text: string, type: string) => {
     setMessages((prev) => [...prev, { text, type }])
@@ -151,8 +160,65 @@ export default function App() {
     [addMessage, updateDebug]
   )
 
+  const stopWakeListening = useCallback(() => {
+    const rec = wakeRecognitionRef.current
+    if (rec) {
+      rec.onresult = null
+      rec.onerror = null
+      rec.onend = null
+      try { rec.abort() } catch {}
+      wakeRecognitionRef.current = null
+    }
+    setIsWakeListening(false)
+  }, [])
+
+  const startWakeListening = useCallback(() => {
+    stopWakeListening()
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognitionAPI) return
+
+    const recognition = new SpeechRecognitionAPI()
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = "pt-BR"
+    recognition.maxAlternatives = 3
+
+    recognition.onresult = (event) => {
+      const fullText = Array.from(event.results)
+        .map((r) => r[0].transcript)
+        .join(" ")
+        .toLowerCase()
+
+      const found = WAKE_WORDS.find((w) => fullText.includes(w))
+      if (!found) return
+
+      const allText = Array.from(event.results).map((r) => r[0].transcript).join(" ")
+      const idx = allText.toLowerCase().indexOf(found)
+      const after = allText.slice(idx + found.length).replace(/^[,:\s]+/, "").trim()
+      wakePendingTextRef.current = after
+      stopWakeListening()
+      connectRef.current?.()
+    }
+
+    recognition.onerror = () => {
+      stopWakeListening()
+    }
+
+    recognition.onend = () => {
+      if (wakeRecognitionRef.current && settings.wakeWordEnabled && !isConnected) {
+        try { recognition.start() } catch {}
+      }
+    }
+
+    recognition.start()
+    wakeRecognitionRef.current = recognition
+    setIsWakeListening(true)
+  }, [stopWakeListening, settings.wakeWordEnabled, isConnected])
+
   const connect = useCallback(async () => {
-    if (clientRef.current) return
+    if (clientRef.current || isConnectingRef.current) return
+    isConnectingRef.current = true
+    stopWakeListening()
     try {
       setConnectionStatus("Obtendo token...")
       const response = await fetch("/api/token", { method: "POST" })
@@ -170,6 +236,10 @@ export default function App() {
       client.voiceName = settings.voice
       client.temperature = settings.temperature
 
+      if (settings.publicMode) {
+        client.setPublicMode(true)
+      }
+
       client.addFunction(new SetVolumeTool(handleVolumeChange))
       client.addFunction(new ShowNotificationTool())
 
@@ -177,6 +247,7 @@ export default function App() {
       client.onError = (err) => {
         setConnectionStatus("Erro: " + err)
         updateDebug("Erro: " + err)
+        isConnectingRef.current = false
       }
       client.onClose = () => {
         setConnectionStatus("Desconectado")
@@ -184,10 +255,20 @@ export default function App() {
         setIsAudioStreaming(false)
         audioStreamerRef.current = null
         clientRef.current = null
+        isConnectingRef.current = false
       }
       client.onOpen = () => {
         setConnectionStatus("Conectado")
         setIsConnected(true)
+        isConnectingRef.current = false
+
+        const pending = wakePendingTextRef.current
+        wakePendingTextRef.current = ""
+        if (pending) {
+          addMessage(pending, "user")
+          client.sendTextMessage(pending)
+        }
+
         if (!greetingShown) {
           addMessage(getGreeting(settings.userLang, settings.userName), "assistant")
           setGreetingShown(true)
@@ -205,8 +286,11 @@ export default function App() {
     } catch (error: any) {
       setConnectionStatus("Falha: " + error.message)
       updateDebug("Erro: " + error.message)
+      isConnectingRef.current = false
     }
-  }, [settings, handleMessage, updateDebug, handleVolumeChange, greetingShown, addMessage])
+  }, [settings, handleMessage, updateDebug, handleVolumeChange, greetingShown, addMessage, stopWakeListening])
+
+  connectRef.current = connect
 
   const disconnect = useCallback(() => {
     clientRef.current?.webSocket?.close()
@@ -226,6 +310,7 @@ export default function App() {
       }
       if (audioStreamerRef.current) {
         await audioStreamerRef.current.start({
+          publicMode: settings.publicMode,
           constraints: {
             noiseSuppression: settings.noiseCancellation,
             echoCancellation: settings.echoCancellation,
@@ -248,6 +333,7 @@ export default function App() {
         }
         if (audioStreamerRef.current) {
           await audioStreamerRef.current.start({
+            publicMode: settings.publicMode,
             constraints: {
               noiseSuppression: settings.noiseCancellation,
               echoCancellation: settings.echoCancellation,
@@ -308,6 +394,15 @@ export default function App() {
     window.addEventListener("psycho-notification", handler as EventListener)
     return () => window.removeEventListener("psycho-notification", handler as EventListener)
   }, [addMessage])
+
+  useEffect(() => {
+    if (settings.wakeWordEnabled && !isConnected) {
+      startWakeListening()
+    } else {
+      stopWakeListening()
+    }
+    return () => stopWakeListening()
+  }, [settings.wakeWordEnabled, isConnected, startWakeListening, stopWakeListening])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-indigo-50">
@@ -372,9 +467,11 @@ export default function App() {
         >
           <div className="flex items-center gap-3">
             <span className={`inline-block w-2 h-2 rounded-full ${
-              isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-300"
+              isConnected ? "bg-emerald-400 animate-pulse" : isWakeListening ? "bg-violet-400 animate-pulse" : "bg-slate-300"
             }`} />
-            <span className="text-xs font-medium text-slate-500">{connectionStatus}</span>
+            <span className="text-xs font-medium text-slate-500">
+              {isWakeListening ? "🎤 Aguardando 'Psycho'..." : connectionStatus}
+            </span>
             {settings.userName && (
               <span className="text-xs text-slate-400 border-l border-slate-200 pl-2">
                 {settings.userName}
