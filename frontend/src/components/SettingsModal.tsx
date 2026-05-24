@@ -21,6 +21,12 @@ export interface Settings {
   volume: number
 }
 
+const langLabels: Record<string, string> = {
+  pt: "Português",
+  en: "English",
+  es: "Español",
+}
+
 interface Props {
   open: boolean
   settings: Settings
@@ -113,8 +119,8 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
         {/* Header */}
         <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
-            <span className="text-xl">⚙️</span>
-            <h2 className="text-lg font-semibold text-slate-800">Settings</h2>
+            <span className="text-xl">💜</span>
+            <h2 className="text-lg font-semibold text-slate-800">Configurações</h2>
           </div>
           <button
             onClick={onClose}
@@ -127,21 +133,21 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
         {/* Body */}
         <div className="overflow-y-auto p-6 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Voice & Behavior */}
-            <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-sm space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Voice & Behavior
+            {/* Voz & Comportamento */}
+            <div className="p-4 border border-violet-100 rounded-2xl bg-white shadow-sm space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500">
+                Voz & Comportamento
               </h3>
               <Select
-                label="Voice"
+                label="Voz"
                 value={settings.voice}
                 onChange={(v) => onChange("voice", v)}
                 options={voices.map((v) => ({ value: v, label: v }))}
               />
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Temperature:{" "}
-                  <span className="text-indigo-600">{settings.temperature.toFixed(1)}</span>
+                  Temperatura:{" "}
+                  <span className="text-psycho-600">{settings.temperature.toFixed(1)}</span>
                 </label>
                 <input
                   type="range"
@@ -150,95 +156,95 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                   step={0.1}
                   value={settings.temperature}
                   onChange={(e) => onChange("temperature", parseFloat(e.target.value))}
-                  className="w-full accent-indigo-600"
+                  className="w-full accent-psycho-600"
                 />
                 <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
-                  <span>0.1</span>
-                  <span>2.0</span>
+                  <span>0.1 (Preciso)</span>
+                  <span>2.0 (Criativo)</span>
                 </div>
               </div>
               <Toggle
                 id="whisper"
                 checked={settings.enableWhisper}
                 onChange={(v) => onChange("enableWhisper", v)}
-                label="Whisper mode"
+                label="Modo Sussurro (volume 25%)"
               />
               <Toggle
                 id="thinking"
                 checked={settings.enableThinking}
                 onChange={(v) => onChange("enableThinking", v)}
-                label="Thinking mode (~1024 tokens)"
+                label="Modo Raciocínio (~1024 tokens)"
               />
             </div>
 
-            {/* API Configuration */}
-            <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-sm space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                API Configuration
+            {/* Configuração da API */}
+            <div className="p-4 border border-violet-100 rounded-2xl bg-white shadow-sm space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500">
+                Configuração da API
               </h3>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Model
+                  Modelo
                 </label>
                 <input
                   type="text"
                   value={settings.model}
                   onChange={(e) => onChange("model", e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                  System Instructions
+                  Instruções do Sistema
                 </label>
                 <textarea
                   value={settings.systemInstructions}
                   onChange={(e) => onChange("systemInstructions", e.target.value)}
                   rows={3}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 resize-none"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50 resize-none"
                 />
               </div>
               <Toggle
                 id="grounding"
                 checked={settings.enableGrounding}
                 onChange={(v) => onChange("enableGrounding", v)}
-                label="Google grounding (disables custom tools)"
+                label="Google Search (desativa ferramentas customizadas)"
               />
             </div>
 
-            {/* Transcription */}
-            <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-sm space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Transcription
+            {/* Transcrição */}
+            <div className="p-4 border border-violet-100 rounded-2xl bg-white shadow-sm space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500">
+                Transcrição
               </h3>
               <Toggle
                 id="inputTrans"
                 checked={settings.enableInputTranscription}
                 onChange={(v) => onChange("enableInputTranscription", v)}
-                label="Input transcription (your speech)"
+                label="Transcrição de entrada (sua fala)"
               />
               <Toggle
                 id="outputTrans"
                 checked={settings.enableOutputTranscription}
                 onChange={(v) => onChange("enableOutputTranscription", v)}
-                label="Output transcription (Gemini responses)"
+                label="Transcrição de saída (respostas do Psycho)"
               />
             </div>
 
-            {/* Activity Detection */}
-            <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-sm space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Activity Detection
+            {/* Detecção de Atividade */}
+            <div className="p-4 border border-violet-100 rounded-2xl bg-white shadow-sm space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500">
+                Detecção de Atividade
               </h3>
               <Toggle
                 id="disableAD"
                 checked={settings.disableActivityDetection}
                 onChange={(v) => onChange("disableActivityDetection", v)}
-                label="Disable activity detection"
+                label="Desabilitar detecção de atividade"
               />
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Silence duration (ms)
+                  Duração do silêncio (ms)
                 </label>
                 <input
                   type="number"
@@ -247,12 +253,12 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                   min={500}
                   max={10000}
                   step={100}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                 />
               </div>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Prefix padding (ms)
+                  Preenchimento inicial (ms)
                 </label>
                 <input
                   type="number"
@@ -261,57 +267,57 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                   min={0}
                   max={2000}
                   step={100}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                 />
               </div>
               <Select
-                label="End of speech sensitivity"
+                label="Sensibilidade de fim de fala"
                 value={settings.endSpeechSensitivity}
                 onChange={(v) => onChange("endSpeechSensitivity", v)}
                 options={[
-                  { value: "END_SENSITIVITY_UNSPECIFIED", label: "Default" },
-                  { value: "END_SENSITIVITY_HIGH", label: "High (quicker cutoff)" },
-                  { value: "END_SENSITIVITY_LOW", label: "Low (longer wait)" },
+                  { value: "END_SENSITIVITY_UNSPECIFIED", label: "Padrão" },
+                  { value: "END_SENSITIVITY_HIGH", label: "Alta (corte mais rápido)" },
+                  { value: "END_SENSITIVITY_LOW", label: "Baixa (espera mais)" },
                 ]}
               />
               <Select
-                label="Start of speech sensitivity"
+                label="Sensibilidade de início de fala"
                 value={settings.startSpeechSensitivity}
                 onChange={(v) => onChange("startSpeechSensitivity", v)}
                 options={[
-                  { value: "START_SENSITIVITY_UNSPECIFIED", label: "Default" },
-                  { value: "START_SENSITIVITY_HIGH", label: "High (quicker detection)" },
-                  { value: "START_SENSITIVITY_LOW", label: "Low (more filtering)" },
+                  { value: "START_SENSITIVITY_UNSPECIFIED", label: "Padrão" },
+                  { value: "START_SENSITIVITY_HIGH", label: "Alta (detecção rápida)" },
+                  { value: "START_SENSITIVITY_LOW", label: "Baixa (mais filtro)" },
                 ]}
               />
               <Select
-                label="Activity handling"
+                label="Manipulação de atividade"
                 value={settings.activityHandling}
                 onChange={(v) => onChange("activityHandling", v)}
                 options={[
-                  { value: "ACTIVITY_HANDLING_UNSPECIFIED", label: "Default (Interrupts)" },
-                  { value: "START_OF_ACTIVITY_INTERRUPTS", label: "Interrupt (Barge-in)" },
-                  { value: "NO_INTERRUPTION", label: "No Interruption" },
+                  { value: "ACTIVITY_HANDLING_UNSPECIFIED", label: "Padrão (Interrompe)" },
+                  { value: "START_OF_ACTIVITY_INTERRUPTS", label: "Interromper (Barge-in)" },
+                  { value: "NO_INTERRUPTION", label: "Sem interrupção" },
                 ]}
               />
             </div>
 
-            {/* Custom Tools */}
-            <div className="p-4 border border-slate-100 rounded-2xl bg-white shadow-sm space-y-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                Custom Tools
+            {/* Ferramentas Customizadas */}
+            <div className="p-4 border border-violet-100 rounded-2xl bg-white shadow-sm space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-violet-500">
+                Ferramentas
               </h3>
               <Toggle
                 id="alertTool"
                 checked={settings.enableAlertTool}
                 onChange={(v) => onChange("enableAlertTool", v)}
-                label="Show Alert Box"
+                label="Notificações do Psycho"
               />
               <Toggle
                 id="cssTool"
                 checked={settings.enableCssStyleTool}
                 onChange={(v) => onChange("enableCssStyleTool", v)}
-                label="Add CSS Style"
+                label="Injetar CSS"
               />
             </div>
           </div>

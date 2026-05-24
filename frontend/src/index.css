@@ -2,4 +2,70 @@
 
 @theme {
   --font-sans: Inter, system-ui, sans-serif;
+  --color-psycho-50: #f5f3ff;
+  --color-psycho-100: #ede9fe;
+  --color-psycho-200: #ddd6fe;
+  --color-psycho-300: #c4b5fd;
+  --color-psycho-400: #a78bfa;
+  --color-psycho-500: #8b5cf6;
+  --color-psycho-600: #7c3aed;
+  --color-psycho-700: #6d28d9;
+  --color-psycho-800: #5b21b6;
+  --color-psycho-900: #4c1d95;
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #c4b5fd transparent;
+  }
+
+  body {
+    background-attachment: fixed;
+  }
+}
+
+@keyframes breathe-in {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+@keyframes breathe-out {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(0.85); opacity: 0.3; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(139, 92, 246, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.6); }
+}
+
+@keyframes fade-slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes expand-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-breathe-in {
+  animation: breathe-in 4s ease-in-out infinite;
+}
+
+.animate-breathe-out {
+  animation: breathe-out 4s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-fade-slide-up {
+  animation: fade-slide-up 0.3s ease-out;
+}
+
+.animate-expand-in {
+  animation: expand-in 0.2s ease-out;
 }
