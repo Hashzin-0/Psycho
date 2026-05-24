@@ -84,6 +84,24 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS voice_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            profile_data TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -294,12 +312,165 @@ def create_goal(title: str, description: str = "", category: str = "wellness", t
     return {"id": goal_id, "title": title}
 
 
-def list_goals() -> list[dict[str, Any]]:
-    """List all goals."""
+def list_goals(active_only: bool = False) -> list[dict[str, Any]]:
+    """List all goals, optionally only active (non-completed) ones."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    if active_only:
+        rows = cursor.execute(
+            "SELECT * FROM goals WHERE completed_at IS NULL ORDER BY created_at DESC"
+        ).fetchall()
+    else:
+        rows = cursor.execute(
+            "SELECT * FROM goals ORDER BY created_at DESC"
+        ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_session_context() -> dict[str, Any]:
+    """Get context from recent sessions, mood entries, and active goals."""
+    conn = _get_db()
+    cursor = conn.cursor()
+
+    recent_sessions = cursor.execute(
+        """SELECT session_id, title, summary, created_at
+           FROM sessions WHERE summary IS NOT NULL AND summary != ''
+           ORDER BY updated_at DESC LIMIT 5"""
+    ).fetchall()
+
+    mood_trend = cursor.execute(
+        """SELECT mood, intensity, note, created_at
+           FROM mood_entries
+           WHERE created_at >= datetime('now', '-30 days')
+           ORDER BY created_at DESC LIMIT 10"""
+    ).fetchall()
+
+    active_goals = cursor.execute(
+        "SELECT * FROM goals WHERE completed_at IS NULL ORDER BY created_at DESC LIMIT 5"
+    ).fetchall()
+
+    conn.close()
+
+    return {
+        "recent_sessions": [dict(s) for s in recent_sessions],
+        "mood_trend": [dict(m) for m in mood_trend],
+        "active_goals": [dict(g) for g in active_goals],
+    }
+
+
+# Voice Profile Management
+
+
+def save_voice_profile(
+    profile_id: str,
+    name: str,
+    profile_data: str,
+) -> dict[str, Any]:
+    """Save or update a voice profile."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO voice_profiles (id, name, profile_data, updated_at)
+           VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               profile_data = excluded.profile_data,
+               updated_at = CURRENT_TIMESTAMP""",
+        (profile_id, name, profile_data),
+    )
+    conn.commit()
+    conn.close()
+    return {"id": profile_id, "name": name}
+
+
+def get_voice_profile(profile_id: str) -> Optional[dict[str, Any]]:
+    """Get a voice profile by ID."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    row = cursor.execute(
+        "SELECT * FROM voice_profiles WHERE id = ?", (profile_id,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "profile_data": row["profile_data"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+    return None
+
+
+def list_voice_profiles() -> list[dict[str, Any]]:
+    """List all voice profiles."""
     conn = _get_db()
     cursor = conn.cursor()
     rows = cursor.execute(
-        "SELECT * FROM goals ORDER BY created_at DESC"
+        "SELECT id, name, created_at, updated_at FROM voice_profiles ORDER BY updated_at DESC"
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def delete_voice_profile(profile_id: str) -> bool:
+    """Delete a voice profile."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM voice_profiles WHERE id = ?", (profile_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+# User Settings
+
+
+def save_user_setting(key: str, value: str):
+    """Save a user setting (upsert)."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        """INSERT INTO user_settings (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               updated_at = CURRENT_TIMESTAMP""",
+        (key, value),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_setting(key: str) -> Optional[str]:
+    """Get a user setting by key."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    row = cursor.execute(
+        "SELECT value FROM user_settings WHERE key = ?", (key,)
+    ).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def get_all_user_settings() -> dict[str, str]:
+    """Get all user settings."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    rows = cursor.execute("SELECT key, value FROM user_settings").fetchall()
+    conn.close()
+    return {row["key"]: row["value"] for row in rows}
+
+
+def update_session_summary(session_id: str, summary: str):
+    """Update the summary of a session."""
+    conn = _get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE sessions SET summary = ?, updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
+        (summary, session_id),
+    )
+    conn.commit()
+    conn.close()

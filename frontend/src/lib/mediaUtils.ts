@@ -1,4 +1,5 @@
 import { GeminiLiveAPI } from "./geminilive"
+import { VoiceProfile, type VoiceProfileData } from "./voiceProfile"
 
 export interface AudioConstraints {
   noiseSuppression?: boolean
@@ -7,11 +8,14 @@ export interface AudioConstraints {
   sampleRate?: number
 }
 
+declare function requestAnimationFrame(cb: () => void): number
+
 export class AudioStreamer {
   private client: GeminiLiveAPI
   private audioContext: AudioContext | null = null
   private audioWorklet: AudioWorkletNode | null = null
   private mediaStream: MediaStream | null = null
+  private analyser: AnalyserNode | null = null
   isStreaming = false
   private sampleRate = 16000
   private publicMode = false
@@ -20,6 +24,10 @@ export class AudioStreamer {
   private calibrationSamples: number[] = []
   private calibrationTimer: ReturnType<typeof setTimeout> | null = null
   private chunkSize = 512
+  private voiceProfile: VoiceProfile | null = null
+  private voiceFilterEnabled = false
+  private voiceFilterThreshold = 0.78
+  private freqDataBuffer: Float32Array<ArrayBuffer> | null = null
 
   constructor(client: GeminiLiveAPI) {
     this.client = client
@@ -47,6 +55,10 @@ export class AudioStreamer {
 
     this.audioWorklet = new AudioWorkletNode(this.audioContext, "audio-capture-processor")
 
+    this.analyser = this.audioContext.createAnalyser()
+    this.analyser.fftSize = 2048
+    this.freqDataBuffer = new Float32Array(this.analyser.frequencyBinCount) as Float32Array<ArrayBuffer>
+
     if (this.publicMode) {
       this.startCalibration(opts?.publicModeSensitivity ?? 5)
     }
@@ -65,6 +77,14 @@ export class AudioStreamer {
           }
         }
 
+        if (this.voiceFilterEnabled && this.voiceProfile?.isEnrolled && this.analyser && this.freqDataBuffer) {
+          this.analyser.getFloatFrequencyData(this.freqDataBuffer)
+          const similarity = this.voiceProfile.getSimilarity(this.freqDataBuffer)
+          if (similarity < this.voiceFilterThreshold) {
+            return
+          }
+        }
+
         const pcmData = this.convertToPCM16(float32Data)
         const base64Audio = this.arrayBufferToBase64(pcmData)
         if (this.client.connected) {
@@ -75,6 +95,7 @@ export class AudioStreamer {
 
     const source = this.audioContext.createMediaStreamSource(this.mediaStream)
     source.connect(this.audioWorklet)
+    this.analyser && source.connect(this.analyser)
     this.isStreaming = true
   }
 
@@ -124,6 +145,17 @@ export class AudioStreamer {
     this.energyThreshold = Math.max(noiseFloor * multiplier, maxRMS * 0.25, 0.008)
   }
 
+  setVoiceProfile(profile: VoiceProfile | null) {
+    this.voiceProfile = profile
+  }
+
+  setVoiceFilter(enabled: boolean, threshold?: number) {
+    this.voiceFilterEnabled = enabled
+    if (threshold !== undefined) {
+      this.voiceFilterThreshold = threshold
+    }
+  }
+
   private calculateRMS(data: Float32Array): number {
     let sumSquares = 0
     for (let i = 0; i < data.length; i++) {
@@ -134,13 +166,19 @@ export class AudioStreamer {
 
   stop() {
     this.isStreaming = false
+    this.cancelCalibration()
     this.audioWorklet?.disconnect()
     this.audioWorklet?.port.close()
     this.audioWorklet = null
+    if (this.analyser) {
+      this.analyser.disconnect()
+      this.analyser = null
+    }
     this.audioContext?.close()
     this.audioContext = null
     this.mediaStream?.getTracks().forEach((t) => t.stop())
     this.mediaStream = null
+    this.freqDataBuffer = null
   }
 
   private convertToPCM16(float32Array: Float32Array): ArrayBuffer {

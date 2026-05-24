@@ -126,28 +126,28 @@ export class GeminiLiveAPI {
 
   automaticActivityDetection: ActivityDetectionConfig = {
     disabled: false,
-    silence_duration_ms: 2000,
-    prefix_padding_ms: 500,
+    silence_duration_ms: 1500,
+    prefix_padding_ms: 400,
     end_of_speech_sensitivity: "END_SENSITIVITY_UNSPECIFIED",
-    start_of_speech_sensitivity: "START_SENSITIVITY_UNSPECIFIED",
+    start_of_speech_sensitivity: "START_SENSITIVITY_HIGH",
   }
 
-  activityHandling = "ACTIVITY_HANDLING_UNSPECIFIED"
+  activityHandling = "ACTIVITY_HANDLING_BETTER_IDEAL"
 
   setPublicMode(enabled: boolean) {
     if (enabled) {
       this.automaticActivityDetection = {
         ...this.automaticActivityDetection,
-        silence_duration_ms: 3000,
+        silence_duration_ms: 2500,
         end_of_speech_sensitivity: "END_SENSITIVITY_LOW",
         start_of_speech_sensitivity: "START_SENSITIVITY_LOW",
       }
     } else {
       this.automaticActivityDetection = {
         ...this.automaticActivityDetection,
-        silence_duration_ms: 2000,
+        silence_duration_ms: 1500,
         end_of_speech_sensitivity: "END_SENSITIVITY_UNSPECIFIED",
-        start_of_speech_sensitivity: "START_SENSITIVITY_UNSPECIFIED",
+        start_of_speech_sensitivity: "START_SENSITIVITY_HIGH",
       }
     }
     if (this.connected) {

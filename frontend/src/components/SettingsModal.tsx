@@ -1,5 +1,6 @@
 import { motion } from "framer-motion"
 import { useState, useRef, useEffect } from "react"
+import { TRAINING_TEXTS } from "../lib/voiceProfile"
 
 export interface Settings {
   userName: string
@@ -13,6 +14,14 @@ export interface Settings {
   wakeWordEnabled: boolean
   publicMode: boolean
   publicModeSensitivity: number
+  voiceFilterEnabled: boolean
+  voiceFilterThreshold: number
+}
+
+export interface TrainingProgress {
+  textIndex: number
+  totalTexts: number
+  phase: "recording" | "processing" | "done"
 }
 
 interface Props {
@@ -20,6 +29,11 @@ interface Props {
   settings: Settings
   onClose: () => void
   onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void
+  voiceProfileEnrolled: boolean
+  isTraining: boolean
+  trainingProgress: TrainingProgress | null
+  onTrainVoice: () => void
+  onResetVoice: () => void
 }
 
 const voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
@@ -57,7 +71,7 @@ function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange
   )
 }
 
-export default function SettingsModal({ open, settings, onClose, onChange }: Props) {
+export default function SettingsModal({ open, settings, onClose, onChange, voiceProfileEnrolled, isTraining, trainingProgress, onTrainVoice, onResetVoice }: Props) {
   const [testTranscript, setTestTranscript] = useState<string | null>(null)
   const [testConfidence, setTestConfidence] = useState<number | null>(null)
   const [isTesting, setIsTesting] = useState(false)
@@ -310,46 +324,134 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
             </div>
           </div>
 
-          {/* Treinamento de Voz */}
+          {/* Treinamento de Perfil de Voz */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
-              {lang === "pt" ? "Treinamento de Voz" : lang === "es" ? "Entrenamiento de Voz" : "Voice Training"}
+              {lang === "pt" ? "Perfil de Voz" : lang === "es" ? "Perfil de Voz" : "Voice Profile"}
             </label>
-            <div className="bg-slate-50/70 rounded-2xl p-4 border border-slate-100 space-y-3">
-              <p className="text-xs text-slate-500 leading-relaxed">
-                {lang === "pt"
-                  ? "O navegador se adapta naturalmente ao seu sotaque através da API de Reconhecimento de Fala. Quanto mais você usar, melhor fica o reconhecimento."
-                  : lang === "es"
-                  ? "El navegador se adapta naturalmente a tu acento mediante la API de Reconocimiento de Voz. Cuanto más lo uses, mejor será el reconocimiento."
-                  : "The browser naturally adapts to your accent through the Speech Recognition API. The more you use it, the better the recognition gets."}
-              </p>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleVoiceTest}
-                  disabled={isTesting}
-                  className={`px-4 py-2 rounded-xl text-xs font-medium transition-all ${
-                    isTesting
-                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                      : "bg-psycho-100 text-psycho-700 hover:bg-psycho-200 border border-psycho-200"
-                  }`}
-                >
-                  {isTesting
-                    ? (lang === "pt" ? "Testando..." : lang === "es" ? "Probando..." : "Testing...")
-                    : (lang === "pt" ? "🔍 Testar Reconhecimento" : lang === "es" ? "🔍 Probar Reconocimiento" : "🔍 Test Recognition")}
-                </button>
-                {testTranscript && (
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-slate-700 truncate">{testTranscript}</p>
-                    {testConfidence !== null && (
-                      <p className="text-[10px] text-slate-400">
-                        {lang === "pt" ? "Confiança" : lang === "es" ? "Confianza" : "Confidence"}: {testConfidence}%
+            <div className="bg-indigo-50/70 rounded-2xl p-4 border border-indigo-100 space-y-3">
+              {voiceProfileEnrolled && !isTraining ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">✅</span>
+                    <span className="text-sm font-medium text-emerald-700">
+                      {lang === "pt" ? "Voz treinada!" : lang === "es" ? "¡Voz entrenada!" : "Voice trained!"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    {lang === "pt"
+                      ? "Seu perfil vocal está salvo. O filtro avançado pode reconhecer sua voz por timbre."
+                      : lang === "es"
+                      ? "Tu perfil vocal está guardado. El filtro avanzado puede reconocer tu voz por timbre."
+                      : "Your voice profile is saved. The advanced filter can recognize your voice by timbre."}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={onTrainVoice}
+                      className="px-3 py-2 rounded-xl text-xs font-medium bg-psycho-100 text-psycho-700 hover:bg-psycho-200 border border-psycho-200 transition-all"
+                    >
+                      {lang === "pt" ? "🎤 Retreinar" : lang === "es" ? "🎤 Volver a entrenar" : "🎤 Retrain"}
+                    </button>
+                    <button
+                      onClick={onResetVoice}
+                      className="px-3 py-2 rounded-xl text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-all"
+                    >
+                      {lang === "pt" ? "🗑️ Remover" : lang === "es" ? "🗑️ Eliminar" : "🗑️ Remove"}
+                    </button>
+                  </div>
+                </>
+              ) : isTraining ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded-full border-2 border-psycho-500 border-t-transparent animate-spin" />
+                    <span className="text-sm font-medium text-psycho-700">
+                      {lang === "pt" ? "Treinando..." : lang === "es" ? "Entrenando..." : "Training..."}
+                    </span>
+                  </div>
+                  {trainingProgress && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>
+                          {lang === "pt" ? "Texto" : lang === "es" ? "Texto" : "Text"} {trainingProgress.textIndex + 1}/{trainingProgress.totalTexts}
+                        </span>
+                        <span>
+                          {trainingProgress.phase === "recording"
+                            ? (lang === "pt" ? "🎤 Gravando..." : lang === "es" ? "🎤 Grabando..." : "🎤 Recording...")
+                            : trainingProgress.phase === "processing"
+                            ? (lang === "pt" ? "⚙️ Processando..." : lang === "es" ? "⚙️ Procesando..." : "⚙️ Processing...")
+                            : (lang === "pt" ? "✅ Pronto" : lang === "es" ? "✅ Listo" : "✅ Done")}
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-psycho-500 to-indigo-500 rounded-full transition-all duration-300"
+                          style={{ width: `${((trainingProgress.textIndex + (trainingProgress.phase === "done" ? 1 : 0)) / trainingProgress.totalTexts) * 100}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-600 italic leading-relaxed px-2 py-2 bg-white/60 rounded-xl">
+                        "{TRAINING_TEXTS[trainingProgress.textIndex] || "Psycho, me ajude a refletir sobre o meu dia."}"
                       </p>
-                    )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    {lang === "pt"
+                      ? "Treine o Psycho para reconhecer SOMENTE a sua voz. Você vai ler 5 textos em voz alta (3s cada) + dizer \"Psycho\" para criar seu perfil vocal único. Após o treino, ative o Filtro por Voz para bloquear outras pessoas."
+                      : lang === "es"
+                      ? "Entrena a Psycho para reconocer SOLO tu voz. Leerás 5 textos en voz alta (3s c/u) + dirás \"Psycho\" para crear tu perfil vocal único."
+                      : "Train Psycho to recognize ONLY your voice. You'll read 5 texts aloud (3s each) + say \"Psycho\" to create your unique voice profile."}
+                  </p>
+                  <button
+                    onClick={onTrainVoice}
+                    className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-gradient-to-r from-psycho-600 to-indigo-600 text-white hover:shadow-md transition-all"
+                  >
+                    🎤 {lang === "pt" ? "Iniciar Treinamento de Voz" : lang === "es" ? "Iniciar Entrenamiento de Voz" : "Start Voice Training"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Filtro Avançado por Voz */}
+          {voiceProfileEnrolled && settings.publicMode && (
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+                {lang === "pt" ? "Filtro Avançado por Voz" : lang === "es" ? "Filtro Avanzado por Voz" : "Advanced Voice Filter"}
+              </label>
+              <div className="space-y-3 bg-indigo-50/70 rounded-2xl p-4 border border-indigo-100">
+                <Toggle
+                  checked={settings.voiceFilterEnabled}
+                  onChange={(v) => onChange("voiceFilterEnabled", v)}
+                  label={lang === "pt" ? "Filtrar por Timbre" : lang === "es" ? "Filtrar por Timbre" : "Filter by Voice Timbre"}
+                  desc={lang === "pt" ? "Bloqueia vozes que não correspondem ao seu timbre treinado" : lang === "es" ? "Bloquea voces que no coinciden con tu timbre entrenado" : "Blocks voices that don't match your trained timbre"}
+                />
+                {settings.voiceFilterEnabled && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-medium text-slate-500">
+                        {lang === "pt" ? "Rigor do Filtro" : lang === "es" ? "Rigor del Filtro" : "Filter Strictness"}
+                      </span>
+                      <span className="text-sm font-semibold text-psycho-600">{Math.round(settings.voiceFilterThreshold * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={60}
+                      max={95}
+                      value={Math.round(settings.voiceFilterThreshold * 100)}
+                      onChange={(e) => onChange("voiceFilterThreshold", parseInt(e.target.value) / 100)}
+                      className="w-full accent-psycho-600"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-400 mt-0.5">
+                      <span>{lang === "pt" ? "Menos rigor" : lang === "es" ? "Menos rigor" : "Less strict"}</span>
+                      <span>{lang === "pt" ? "Máximo (só você)" : lang === "es" ? "Máximo (solo tú)" : "Maximum (only you)"}</span>
+                    </div>
                   </div>
                 )}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Idioma */}
           <div>

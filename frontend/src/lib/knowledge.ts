@@ -157,3 +157,83 @@ export async function listGoals(): Promise<GoalData[]> {
     return []
   }
 }
+
+export async function getSessionContext(): Promise<{
+  recent_sessions: any[]
+  mood_trend: any[]
+  active_goals: any[]
+}> {
+  try {
+    const res = await fetch("/api/session/context", { method: "POST" })
+    return await res.json()
+  } catch {
+    return { recent_sessions: [], mood_trend: [], active_goals: [] }
+  }
+}
+
+export async function saveProfile(profileData: any): Promise<any> {
+  try {
+    const res = await fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "default", name: "Minha Voz", profile_data: profileData }),
+    })
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function getProfile(): Promise<any | null> {
+  try {
+    const res = await fetch("/api/profile/default")
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function deleteProfile(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/profile/default", { method: "DELETE" })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function saveSettings(settings: Record<string, any>): Promise<boolean> {
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function getSettings(): Promise<Record<string, any>> {
+  try {
+    const res = await fetch("/api/settings")
+    const data = await res.json()
+    return data.settings || {}
+  } catch {
+    return {}
+  }
+}
+
+export async function saveSessionSummary(sessionId: string, summary: string) {
+  try {
+    await fetch(`/api/session/${sessionId}/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, summary }),
+    })
+  } catch {
+    // silent fail
+  }
+}
