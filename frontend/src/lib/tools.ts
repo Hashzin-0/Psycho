@@ -1,4 +1,4 @@
-class FunctionCallTool {
+export class FunctionCallTool {
   name: string
   description: string
   parameters: Record<string, any>
@@ -29,7 +29,6 @@ class FunctionCallTool {
 }
 
 type VolumeCallback = (level: number) => void
-type WhisperCallback = (enabled: boolean) => void
 type AudioToggleCallback = () => void
 type CameraToggleCallback = () => void
 type ScreenToggleCallback = () => void
@@ -47,17 +46,17 @@ export class SetVolumeTool extends FunctionCallTool {
   constructor(onVolumeChange?: VolumeCallback) {
     super(
       "set_volume",
-      "Adjusts the AI voice output volume. Use 25 for whisper/quiet mode, 100 for normal volume. The AI can proactively lower volume when appropriate (sensitive topics, late night, user in public place).",
+      "Adjusts the AI voice output volume. ONLY use when the user explicitly asks for a volume change (e.g., \"agente, volume 30\", \"fale baixo\", \"fale sussurrando\"). Never call this proactively on your own — wait for the user to request it.",
       {
         type: "object",
         properties: {
           level: {
             type: "number",
-            description: "Volume level from 1 to 100. 25 = whisper mode (quiet, gentle), 50 = moderate, 75 = conversational, 100 = full volume.",
+            description: "Volume level from 1 to 100. 25 = very quiet, 50 = moderate, 75 = conversational, 100 = full volume.",
           },
           reason: {
             type: "string",
-            description: "Optional reason for the volume change (e.g., 'whisper mode', 'sensitive topic', 'user requested').",
+            description: "Optional reason for the volume change (e.g., 'user requested lower volume').",
           },
         },
       },
@@ -72,35 +71,6 @@ export class SetVolumeTool extends FunctionCallTool {
     const level = Math.max(1, Math.min(100, parameters.level || 100))
     this.onVolumeChange?.(level)
     return `Volume set to ${level}${parameters.reason ? ` (${parameters.reason})` : ""}`
-  }
-}
-
-export class SetWhisperModeTool extends FunctionCallTool {
-  private onWhisperChange: WhisperCallback | null = null
-
-  constructor(onWhisperChange?: WhisperCallback) {
-    super(
-      "set_whisper_mode",
-      "Toggles whisper mode on or off. When whisper mode is on, the volume is reduced to 25% and the AI speaks softly. Use when the user requests quiet speech, or when context calls for a gentle tone.",
-      {
-        type: "object",
-        properties: {
-          enabled: {
-            type: "boolean",
-            description: "Whether to enable whisper mode (true) or disable it (false).",
-          },
-        },
-      },
-      ["enabled"]
-    )
-    if (onWhisperChange) {
-      this.onWhisperChange = onWhisperChange
-    }
-  }
-
-  functionToCall(parameters: Record<string, any>) {
-    this.onWhisperChange?.(!!parameters.enabled)
-    return parameters.enabled ? "Whisper mode activated, volume set to 25%" : "Whisper mode deactivated, volume restored to normal"
   }
 }
 

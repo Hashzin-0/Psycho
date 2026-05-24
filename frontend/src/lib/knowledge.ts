@@ -67,12 +67,14 @@ export async function getCategories(): Promise<string[]> {
   }
 }
 
-export async function createSession(title = "Nova Sessão"): Promise<string> {
+export async function createSession(title = "Nova Sessão", agentId?: string): Promise<string> {
   try {
+    const body: Record<string, any> = { title }
+    if (agentId) body.agent_id = agentId
     const res = await fetch("/api/session/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(body),
     })
     const data = await res.json()
     return data.session_id
@@ -103,9 +105,10 @@ export async function getSessionHistory(sessionId: string): Promise<{ role: stri
   }
 }
 
-export async function listSessions(): Promise<SessionData[]> {
+export async function listSessions(agentId?: string): Promise<SessionData[]> {
   try {
-    const res = await fetch("/api/sessions")
+    const params = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : ""
+    const res = await fetch(`/api/sessions${params}`)
     const data = await res.json()
     return data.sessions || []
   } catch {
@@ -148,9 +151,10 @@ export async function createGoal(title: string, description = "", category = "we
   }
 }
 
-export async function listGoals(): Promise<GoalData[]> {
+export async function listGoals(activeOnly: boolean = false, agentId: string = "psycho"): Promise<GoalData[]> {
   try {
-    const res = await fetch("/api/goals")
+    const params = new URLSearchParams({ agent_id: agentId, active_only: String(activeOnly) })
+    const res = await fetch(`/api/goals?${params}`)
     const data = await res.json()
     return data.goals || []
   } catch {
@@ -158,13 +162,17 @@ export async function listGoals(): Promise<GoalData[]> {
   }
 }
 
-export async function getSessionContext(): Promise<{
+export async function getSessionContext(agentId: string = "psycho"): Promise<{
   recent_sessions: any[]
   mood_trend: any[]
   active_goals: any[]
 }> {
   try {
-    const res = await fetch("/api/session/context", { method: "POST" })
+    const res = await fetch("/api/session/context", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: agentId }),
+    })
     return await res.json()
   } catch {
     return { recent_sessions: [], mood_trend: [], active_goals: [] }
@@ -235,5 +243,182 @@ export async function saveSessionSummary(sessionId: string, summary: string) {
     })
   } catch {
     // silent fail
+  }
+}
+
+// ─── Wellington / Gastronomy API ──────────────────────────
+
+export interface EncyclopediaEntry {
+  id: string
+  category: string
+  title: string
+  content: string
+  references: string
+  score?: number
+}
+
+export interface CustomRecipe {
+  id: string
+  title: string
+  original_recipe_id?: string
+  ingredients: string
+  instructions: string
+  notes: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface CookedEntry {
+  id: number
+  session_id: string
+  recipe_id: string
+  recipe_title: string
+  notes: string
+  rating: number
+  difficulty: string
+  cooking_time_minutes: number
+  created_at: string
+}
+
+export interface CookingHistoryEntry {
+  id: number
+  session_id: string
+  event_type: string
+  description: string
+  details: string
+  created_at: string
+}
+
+export async function searchEncyclopedia(query: string, limit = 5): Promise<EncyclopediaEntry[]> {
+  try {
+    const res = await fetch("/api/wellington/recipes/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit }),
+    })
+    const data = await res.json()
+    return data.results || []
+  } catch {
+    return []
+  }
+}
+
+export async function getEncyclopediaEntry(id: string): Promise<EncyclopediaEntry | null> {
+  try {
+    const res = await fetch(`/api/wellington/recipes/entry/${id}`)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function getEncyclopediaCategories(): Promise<string[]> {
+  try {
+    const res = await fetch("/api/wellington/recipes/categories")
+    const data = await res.json()
+    return data.categories || []
+  } catch {
+    return []
+  }
+}
+
+export async function listEncyclopedia(): Promise<EncyclopediaEntry[]> {
+  try {
+    const res = await fetch("/api/wellington/encyclopedia")
+    const data = await res.json()
+    return data.entries || []
+  } catch {
+    return []
+  }
+}
+
+export async function saveCustomRecipe(recipe: {
+  id?: string
+  title: string
+  original_recipe_id?: string
+  ingredients: string
+  instructions: string
+  notes?: string
+}): Promise<any> {
+  try {
+    const res = await fetch("/api/wellington/recipes/custom", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(recipe),
+    })
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function listCustomRecipes(): Promise<CustomRecipe[]> {
+  try {
+    const res = await fetch("/api/wellington/recipes/custom")
+    const data = await res.json()
+    return data.recipes || []
+  } catch {
+    return []
+  }
+}
+
+export async function getCustomRecipe(id: string): Promise<CustomRecipe | null> {
+  try {
+    const res = await fetch(`/api/wellington/recipes/custom/${id}`)
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function deleteCustomRecipe(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/wellington/recipes/custom/${id}`, { method: "DELETE" })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+export async function logCookedRecipe(data: {
+  session_id?: string
+  recipe_id?: string
+  recipe_title: string
+  notes?: string
+  rating?: number
+  difficulty?: string
+  cooking_time_minutes?: number
+}): Promise<any> {
+  try {
+    const res = await fetch("/api/wellington/cooked", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    })
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function listCookedRecipes(): Promise<CookedEntry[]> {
+  try {
+    const res = await fetch("/api/wellington/cooked")
+    const data = await res.json()
+    return data.entries || []
+  } catch {
+    return []
+  }
+}
+
+export async function getAgents(): Promise<{ id: string; name: string; emoji: string; subtitle_pt: string }[]> {
+  try {
+    const res = await fetch("/api/agents")
+    const data = await res.json()
+    return data.agents || []
+  } catch {
+    return []
   }
 }

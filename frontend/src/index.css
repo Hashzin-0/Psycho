@@ -12,6 +12,16 @@
   --color-psycho-700: #6d28d9;
   --color-psycho-800: #5b21b6;
   --color-psycho-900: #4c1d95;
+  --color-warm-50: #fff7ed;
+  --color-warm-100: #ffedd5;
+  --color-warm-200: #fed7aa;
+  --color-warm-300: #fdba74;
+  --color-warm-400: #fb923c;
+  --color-warm-500: #f97316;
+  --color-warm-600: #ea580c;
+  --color-warm-700: #c2410c;
+  --color-warm-800: #9a3412;
+  --color-warm-900: #7c2d12;
 }
 
 @layer base {

@@ -38,6 +38,9 @@ interface Props {
   isTestingTimbre: boolean
   testTimbreScore: number | null
   testTimbreMatch: boolean | null
+  agentName?: string
+  agentEmoji?: string
+  agentColor?: string
 }
 
 const voices = ["Puck", "Charon", "Kore", "Fenrir", "Aoede"]
@@ -75,7 +78,13 @@ function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange
   )
 }
 
-export default function SettingsModal({ open, settings, onClose, onChange, voiceProfileEnrolled, isTraining, trainingProgress, onTrainVoice, onResetVoice, onTestTimbre, isTestingTimbre, testTimbreScore, testTimbreMatch }: Props) {
+export default function SettingsModal({
+  open, settings, onClose, onChange,
+  voiceProfileEnrolled, isTraining, trainingProgress,
+  onTrainVoice, onResetVoice, onTestTimbre,
+  isTestingTimbre, testTimbreScore, testTimbreMatch,
+  agentName, agentEmoji, agentColor,
+}: Props) {
   const [testTranscript, setTestTranscript] = useState<string | null>(null)
   const [testConfidence, setTestConfidence] = useState<number | null>(null)
   const [isTesting, setIsTesting] = useState(false)
@@ -121,13 +130,14 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
       setIsTesting(false)
     }
 
-    recognition.onend = () => {
-      setIsTesting(false)
-    }
-
+    recognition.onend = () => { setIsTesting(false) }
     recognition.start()
     testRecognitionRef.current = recognition
   }
+
+  const isWarm = agentColor === "warm"
+  const gradientFrom = isWarm ? "from-orange-600" : "from-psycho-600"
+  const gradientTo = isWarm ? "to-amber-600" : "to-indigo-600"
 
   return (
     <motion.div
@@ -145,10 +155,10 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
         className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col"
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-psycho-600 to-indigo-600 px-6 py-5 text-white flex-shrink-0">
+        <div className={`bg-gradient-to-r ${gradientFrom} ${gradientTo} px-6 py-5 text-white flex-shrink-0`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">💜</span>
+              <span className="text-2xl">{agentEmoji || "💜"}</span>
               <h2 className="text-lg font-semibold">
                 {lang === "pt" ? "Preferências" : lang === "es" ? "Preferencias" : "Preferences"}
               </h2>
@@ -161,6 +171,7 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
             </button>
           </div>
           <p className="text-sm text-white/70 mt-1 ml-9">
+            {agentName ? `${agentName} — ` : ""}
             {lang === "pt" ? "Personalize sua experiência" : lang === "es" ? "Personaliza tu experiencia" : "Customize your experience"}
           </p>
         </div>
@@ -187,7 +198,7 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
           {/* Voz */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
-              {lang === "pt" ? "Voz do Psycho" : lang === "es" ? "Voz de Psycho" : "Psycho's voice"}
+              {`${agentName || ""} `}{lang === "pt" ? "Voz" : lang === "es" ? "Voz" : "Voice"}
             </label>
             <div className="grid grid-cols-5 gap-2">
               {voices.map((v) => (
@@ -196,8 +207,8 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                   onClick={() => onChange("voice", v)}
                   className={`px-2 py-2.5 rounded-xl text-xs font-medium transition-all ${
                     settings.voice === v
-                      ? "bg-psycho-100 text-psycho-700 border-2 border-psycho-300 shadow-sm"
-                      : "bg-slate-50 text-slate-600 border-2 border-transparent hover:bg-violet-50"
+                      ? `${isWarm ? "bg-orange-100 text-orange-700 border-orange-300" : "bg-psycho-100 text-psycho-700 border-psycho-300"} border-2 shadow-sm`
+                      : "bg-slate-50 text-slate-600 border-2 border-transparent hover:bg-slate-100"
                   }`}
                 >
                   {v}
@@ -250,7 +261,7 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
               max={100}
               value={settings.volume}
               onChange={(e) => onChange("volume", parseInt(e.target.value))}
-              className="w-full accent-psycho-600"
+              className={`w-full ${isWarm ? "accent-orange-500" : "accent-psycho-600"}`}
             />
             <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
               <span>🔇</span>
@@ -294,14 +305,14 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
               <Toggle
                 checked={settings.wakeWordEnabled}
                 onChange={(v) => onChange("wakeWordEnabled", v)}
-                label={lang === "pt" ? "Wake Word (\"Psycho\")" : lang === "es" ? "Palabra de Activación" : "Wake Word"}
-                desc={lang === "pt" ? "Diga \"Psycho\" seguido da sua mensagem para ativar o Psycho automaticamente" : lang === "es" ? "Di \"Psycho\" seguido de tu mensaje para activar Psycho" : "Say \"Psycho\" followed by your message to activate Psycho automatically"}
+                label={lang === "pt" ? `Wake Word (\"Psycho\" / \"Wellington\")` : lang === "es" ? "Palabra de Activación" : "Wake Word"}
+                desc={lang === "pt" ? "Diga \"Psycho\" ou \"Wellington\" seguido da sua mensagem para ativar automaticamente" : lang === "es" ? "Di \"Psycho\" o \"Wellington\" seguido de tu mensaje para activar" : 'Say "Psycho" or "Wellington" followed by your message to activate'}
               />
               <Toggle
                 checked={settings.publicMode}
                 onChange={(v) => onChange("publicMode", v)}
                 label={lang === "pt" ? "Cancelamento Público" : lang === "es" ? "Cancelación Pública" : "Public Mode"}
-                desc={lang === "pt" ? "Apenas sua voz pode interromper o Psycho — vozes de fundo são ignoradas" : lang === "es" ? "Solo tu voz interrumpe a Psycho — las voces de fondo se ignoran" : "Only your voice can interrupt Psycho — background voices are ignored"}
+                desc={lang === "pt" ? "Apenas sua voz pode interromper — vozes de fundo são ignoradas" : lang === "es" ? "Solo tu voz interrumpe — las voces de fondo se ignoran" : "Only your voice interrupts — background voices ignored"}
               />
               {settings.publicMode && (
                 <div className="pt-2 border-t border-violet-200/50">
@@ -325,6 +336,28 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* Notifications */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+              {lang === "pt" ? "Notificações" : lang === "es" ? "Notificaciones" : "Notifications"}
+            </label>
+            <div className="bg-sky-50/70 rounded-2xl p-4 border border-sky-100">
+              <Toggle
+                checked={Notification.permission === "granted"}
+                onChange={async (v) => {
+                  if (v && "Notification" in window) {
+                    await Notification.requestPermission()
+                  }
+                }}
+                label={lang === "pt" ? "Notificações Push" : lang === "es" ? "Notificaciones Push" : "Push Notifications"}
+                desc={lang === "pt" ? "Receba notificações de timers e alertas dos assistentes" : lang === "es" ? "Recibe notificaciones de temporizadores y alertas" : "Receive timer and assistant alert notifications"}
+              />
+              <p className="text-[10px] text-slate-400 mt-2">
+                {lang === "pt" ? "Os timers da cozinha do Wellington notificam mesmo com o app em segundo plano." : lang === "es" ? "Los temporizadores de cocina notifican incluso en segundo plano." : "Wellington's kitchen timers notify even in the background."}
+              </p>
             </div>
           </div>
 
@@ -371,24 +404,9 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
                         <div
-                          className={`h-full rounded-full transition-all duration-200 ${
-                            testTimbreMatch ? "bg-emerald-500" : "bg-red-400"
-                          }`}
+                          className={`h-full rounded-full transition-all duration-200 ${testTimbreMatch ? "bg-emerald-500" : "bg-red-400"}`}
                           style={{ width: `${testTimbreScore !== null ? Math.round(testTimbreScore * 100) : 0}%` }}
                         />
-                      </div>
-                      <div className="flex items-center justify-center gap-1.5 text-xs">
-                        {testTimbreMatch === true && (
-                          <span className="text-emerald-600 font-medium">✅ Sua Voz</span>
-                        )}
-                        {testTimbreMatch === false && (
-                          <span className="text-red-500 font-medium">❌ Voz Rejeitada</span>
-                        )}
-                        {testTimbreMatch === null && (
-                          <span className="text-slate-400">
-                            {lang === "pt" ? "Aguardando..." : lang === "es" ? "Esperando..." : "Waiting..."}
-                          </span>
-                        )}
                       </div>
                     </div>
                   )}
@@ -403,25 +421,14 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                           {Math.round(testTimbreScore * 100)}%
                         </span>
                       </div>
-                      <div className="flex items-center justify-center gap-1.5 text-xs">
-                        {testTimbreMatch
-                          ? <span className="text-emerald-600 font-medium">✅ Sua Voz</span>
-                          : <span className="text-red-500 font-medium">❌ Voz Rejeitada</span>}
-                      </div>
                     </div>
                   )}
 
                   <div className="flex gap-2">
-                    <button
-                      onClick={onTrainVoice}
-                      className="px-3 py-2 rounded-xl text-xs font-medium bg-psycho-100 text-psycho-700 hover:bg-psycho-200 border border-psycho-200 transition-all"
-                    >
+                    <button onClick={onTrainVoice} className="px-3 py-2 rounded-xl text-xs font-medium bg-psycho-100 text-psycho-700 hover:bg-psycho-200 border border-psycho-200 transition-all">
                       {lang === "pt" ? "🎤 Retreinar" : lang === "es" ? "🎤 Volver a entrenar" : "🎤 Retrain"}
                     </button>
-                    <button
-                      onClick={onResetVoice}
-                      className="px-3 py-2 rounded-xl text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-all"
-                    >
+                    <button onClick={onResetVoice} className="px-3 py-2 rounded-xl text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-all">
                       {lang === "pt" ? "🗑️ Remover" : lang === "es" ? "🗑️ Eliminar" : "🗑️ Remove"}
                     </button>
                   </div>
@@ -437,20 +444,11 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                   {trainingProgress && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between text-xs text-slate-500">
-                        <span>
-                          {lang === "pt" ? "Texto" : lang === "es" ? "Texto" : "Text"} {trainingProgress.textIndex + 1}/{trainingProgress.totalTexts}
-                        </span>
-                        <span>
-                          {trainingProgress.phase === "recording"
-                            ? (lang === "pt" ? "🎤 Gravando..." : lang === "es" ? "🎤 Grabando..." : "🎤 Recording...")
-                            : trainingProgress.phase === "processing"
-                            ? (lang === "pt" ? "⚙️ Processando..." : lang === "es" ? "⚙️ Procesando..." : "⚙️ Processing...")
-                            : (lang === "pt" ? "✅ Pronto" : lang === "es" ? "✅ Listo" : "✅ Done")}
-                        </span>
+                        <span>{lang === "pt" ? "Texto" : lang === "es" ? "Texto" : "Text"} {trainingProgress.textIndex + 1}/{trainingProgress.totalTexts}</span>
+                        <span>{trainingProgress.phase === "recording" ? "🎤 Gravando..." : trainingProgress.phase === "processing" ? "⚙️ Processando..." : "✅ Pronto"}</span>
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-psycho-500 to-indigo-500 rounded-full transition-all duration-300"
+                        <div className="h-full bg-gradient-to-r from-psycho-500 to-indigo-500 rounded-full transition-all duration-300"
                           style={{ width: `${((trainingProgress.textIndex + (trainingProgress.phase === "done" ? 1 : 0)) / trainingProgress.totalTexts) * 100}%` }}
                         />
                       </div>
@@ -464,15 +462,12 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                 <>
                   <p className="text-xs text-slate-500 leading-relaxed">
                     {lang === "pt"
-                      ? "Treine o Psycho para reconhecer SOMENTE a sua voz. Você vai ler 5 textos em voz alta (3s cada) + dizer \"Psycho\" para criar seu perfil vocal único. Após o treino, ative o Filtro por Voz para bloquear outras pessoas."
+                      ? "Treine para reconhecer SOMENTE a sua voz. Você vai ler 5 textos em voz alta (3s cada) + dizer o nome do assistente para criar seu perfil vocal único."
                       : lang === "es"
-                      ? "Entrena a Psycho para reconocer SOLO tu voz. Leerás 5 textos en voz alta (3s c/u) + dirás \"Psycho\" para crear tu perfil vocal único."
-                      : "Train Psycho to recognize ONLY your voice. You'll read 5 texts aloud (3s each) + say \"Psycho\" to create your unique voice profile."}
+                      ? "Entrena para reconocer SOLO tu voz. Leerás 5 textos en voz alta (3s c/u) + dirás el nombre del asistente para crear tu perfil vocal único."
+                      : "Train to recognize ONLY your voice. Read 5 texts aloud (3s each) + say the assistant's name to create your unique voice profile."}
                   </p>
-                  <button
-                    onClick={onTrainVoice}
-                    className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-gradient-to-r from-psycho-600 to-indigo-600 text-white hover:shadow-md transition-all"
-                  >
+                  <button onClick={onTrainVoice} className="w-full px-4 py-3 rounded-xl text-sm font-medium bg-gradient-to-r from-psycho-600 to-indigo-600 text-white hover:shadow-md transition-all">
                     🎤 {lang === "pt" ? "Iniciar Treinamento de Voz" : lang === "es" ? "Iniciar Entrenamiento de Voz" : "Start Voice Training"}
                   </button>
                 </>
@@ -496,9 +491,7 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                 {settings.voiceFilterEnabled && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-medium text-slate-500">
-                        {lang === "pt" ? "Rigor do Filtro" : lang === "es" ? "Rigor del Filtro" : "Filter Strictness"}
-                      </span>
+                      <span className="text-[11px] font-medium text-slate-500">{lang === "pt" ? "Rigor do Filtro" : lang === "es" ? "Rigor del Filtro" : "Filter Strictness"}</span>
                       <span className="text-sm font-semibold text-psycho-600">{Math.round(settings.voiceFilterThreshold * 100)}%</span>
                     </div>
                     <input
@@ -509,10 +502,6 @@ export default function SettingsModal({ open, settings, onClose, onChange, voice
                       onChange={(e) => onChange("voiceFilterThreshold", parseInt(e.target.value) / 100)}
                       className="w-full accent-psycho-600"
                     />
-                    <div className="flex justify-between text-[9px] text-slate-400 mt-0.5">
-                      <span>{lang === "pt" ? "Menos rigor" : lang === "es" ? "Menos rigor" : "Less strict"}</span>
-                      <span>{lang === "pt" ? "Máximo (só você)" : lang === "es" ? "Máximo (solo tú)" : "Maximum (only you)"}</span>
-                    </div>
                   </div>
                 )}
               </div>

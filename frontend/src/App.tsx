@@ -2,24 +2,26 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { GeminiLiveAPI, MultimodalLiveResponseType, type ResponseMessage } from "./lib/geminilive"
 import { AudioStreamer, AudioPlayer, VideoStreamer, ScreenCapture } from "./lib/mediaUtils"
-import {
-  SetVolumeTool, SetWhisperModeTool, SetVoiceToneTool,
-  ToggleMicrophoneTool, SetVoiceTool,
-  ToggleCameraTool, ToggleScreenShareTool,
-  OpenSettingsTool, ClearChatTool, RunCommandTool,
-  SetLanguageTool, ShowNotificationTool,
-} from "./lib/tools"
-import { SYSTEM_PROMPT, GREETING_MESSAGES } from "./lib/systemPrompt"
-import { detectCommand, COMMANDS, getHelpText } from "./lib/commands"
+import { detectCommand, getHelpText } from "./lib/commands"
+import { getHelpTextWellington } from "./lib/commandsWellington"
 import { AmbientListener, type AmbientEvent } from "./lib/ambientListener"
 import { getSessionContext, saveSessionSummary, createSession, saveMessage, getProfile, saveProfile, deleteProfile } from "./lib/knowledge"
 import { VoiceProfile, type VoiceProfileData } from "./lib/voiceProfile"
+import { TimerManager, type Timer } from "./lib/timerManager"
+import { AGENTS, type AgentId, createAgentTools, getAgentCommands, getAgentPages } from "./lib/agentSystem"
 import SettingsModal from "./components/SettingsModal"
 import type { Settings } from "./components/SettingsModal"
 import MediaControls from "./components/MediaControls"
 import Chat from "./components/Chat"
-
-const WAKE_WORDS = ["psycho", "psico", "psyco"]
+import AgentHub from "./components/AgentHub"
+import RecipeEncyclopedia from "./components/WellingtonPages/RecipeEncyclopedia"
+import CookedRecipes from "./components/WellingtonPages/CookedRecipes"
+import CustomRecipes from "./components/WellingtonPages/CustomRecipes"
+import TimerPanel from "./components/WellingtonPages/TimerPanel"
+import SessionReview from "./components/PsychoPages/SessionReview"
+import MoodChart from "./components/PsychoPages/MoodChart"
+import GoalsTracker from "./components/PsychoPages/GoalsTracker"
+import TechniqueLib from "./components/PsychoPages/TechniqueLib"
 
 const defaultSettings: Settings = {
   userName: "",
@@ -44,20 +46,13 @@ function detectUserLanguage(): string {
   return "en"
 }
 
-function getGreeting(lang: string, name: string): string {
-  const base = GREETING_MESSAGES[lang] || GREETING_MESSAGES["pt"]
-  if (name.trim()) {
-    const greeting = lang === "pt" ? `Olá, ${name}!` : lang === "es" ? `¡Hola, ${name}!` : `Hello, ${name}!`
-    return `${greeting}\n\n${base.split("\n\n").slice(1).join("\n\n")}`
-  }
-  return base
-}
-
 export default function App() {
   const [settings, setSettings] = useState<Settings>(() => ({
     ...defaultSettings,
     userLang: detectUserLanguage(),
   }))
+  const [currentAgent, setCurrentAgent] = useState<AgentId | "hub">("hub")
+  const [currentPage, setCurrentPage] = useState<string | null>(null)
   const [connectionStatus, setConnectionStatus] = useState("Desconectado")
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState<{ text: string; type: string }[]>([])
@@ -76,9 +71,13 @@ export default function App() {
   const [isTestingTimbre, setIsTestingTimbre] = useState(false)
   const [testTimbreScore, setTestTimbreScore] = useState<number | null>(null)
   const [testTimbreMatch, setTestTimbreMatch] = useState<boolean | null>(null)
+  const [timers, setTimers] = useState<Timer[]>([])
+
+  const agent = currentAgent !== "hub" ? AGENTS[currentAgent] : null
+  const agentPages = currentAgent !== "hub" ? getAgentPages(currentAgent) : []
+  const agentCommands = currentAgent !== "hub" ? getAgentCommands(currentAgent) : []
 
   const voiceProfileRef = useRef<VoiceProfile>(new VoiceProfile())
-
   const clientRef = useRef<GeminiLiveAPI | null>(null)
   const audioStreamerRef = useRef<AudioStreamer | null>(null)
   const audioPlayerRef = useRef<AudioPlayer | null>(null)
@@ -92,6 +91,9 @@ export default function App() {
   const wakePendingTextRef = useRef("")
   const isConnectingRef = useRef(false)
   const connectRef = useRef<() => Promise<void> | undefined>(undefined)
+  const timerManagerRef = useRef<TimerManager>(new TimerManager())
+
+  const lang = settings.userLang as "pt" | "en" | "es"
 
   const addMessage = useCallback((text: string, type: string) => {
     setMessages((prev) => [...prev, { text, type }])
@@ -101,11 +103,69 @@ export default function App() {
     setDebugInfo(text)
   }, [])
 
+  // Timer management
+  useEffect(() => {
+    const tm = timerManagerRef.current
+    tm.setOnTick((t) => {
+      setTimers((prev) => {
+        const existing = prev.findIndex((x) => x.id === t.id)
+        if (existing >= 0) {
+          const copy = [...prev]
+          copy[existing] = t
+          return copy
+        }
+        return [...prev, t]
+      })
+    })
+    tm.setOnComplete((t) => {
+      setTimers((prev) => prev.map((x) => (x.id === t.id ? t : x)))
+    })
+
+    const handler = (e: CustomEvent) => {
+      addMessage(`⏰ **${e.detail.label}** — ${e.detail.minutes} minutos acabaram!`, "assistant")
+    }
+    window.addEventListener("timer-complete", handler as EventListener)
+    return () => {
+      window.removeEventListener("timer-complete", handler as EventListener)
+      tm.clearAll()
+    }
+  }, [addMessage])
+
+  const handleSetTimer = useCallback((minutes: number, label: string): string => {
+    const id = timerManagerRef.current.setTimer(minutes, label)
+    const timeStr = minutes >= 60 ? `${Math.floor(minutes / 60)}h${minutes % 60 > 0 ? ` ${minutes % 60}min` : ""}` : `${minutes}min`
+    addMessage(`⏱️ Timer de **${timeStr}** definido para **${label}** (id: ${id})`, "system")
+    return id
+  }, [addMessage])
+
+  const handleCancelTimer = useCallback((id: string): boolean => {
+    const ok = timerManagerRef.current.cancelTimer(id)
+    if (ok) {
+      addMessage(`⏱️ Timer **${id}** cancelado`, "system")
+      setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, active: false } : t)))
+    }
+    return ok
+  }, [addMessage])
+
+  const handleLogCooked = useCallback((title: string, notes: string, rating: number) => {
+    import("./lib/knowledge").then(({ logCookedRecipe }) => {
+      logCookedRecipe({
+        recipe_title: title,
+        notes,
+        rating,
+        session_id: sessionId || undefined,
+      })
+    })
+    const stars = "★".repeat(rating) + "☆".repeat(5 - rating)
+    addMessage(`🍽️ Receita registrada: **${title}** ${rating > 0 ? stars : ""}${notes ? ` — ${notes}` : ""}`, "system")
+  }, [addMessage, sessionId])
+
+  // Volume controls
   const handleVolumeChange = useCallback((level: number) => {
     const clamped = Math.max(1, Math.min(100, level))
     audioPlayerRef.current?.setVolume(clamped / 100)
     setSettings((s) => ({ ...s, volume: clamped }))
-    addMessage(`[Volume ajustado para ${clamped}% pelo Psycho]`, "system")
+    addMessage(`[Volume ajustado para ${clamped}%]`, "system")
   }, [addMessage])
 
   const handleToneChange = useCallback((tone: string) => {
@@ -114,16 +174,23 @@ export default function App() {
     audioPlayerRef.current?.setVolume(vol / 100)
     setSettings((s) => ({ ...s, volume: vol }))
     const labels: Record<string, string> = { gentle: "suave", calm: "calmo", soothing: "sereno", warm: "caloroso", natural: "natural" }
-    addMessage(`[Psycho ajustou o tom para ${labels[tone] || tone} e volume para ${vol}%]`, "system")
+    addMessage(`[Tom ajustado para ${labels[tone] || tone}, volume ${vol}%]`, "system")
   }, [addMessage])
 
-  const handleWhisperChange = useCallback((enabled: boolean) => {
-    const vol = enabled ? 25 : settings.volume
-    audioPlayerRef.current?.setVolume(vol / 100)
-    clientRef.current?.setWhisperMode(enabled)
-    setSettings((s) => ({ ...s, volume: vol }))
-    addMessage(enabled ? "[Modo sussurro ativado]" : "[Modo sussurro desativado]", "system")
-  }, [addMessage, settings.volume])
+  const handleVoiceChange = useCallback((voice: string) => {
+    setSettings((s) => ({ ...s, voice }))
+    clientRef.current?.setVoice(voice)
+    addMessage(`[Voz alterada para ${voice}]`, "system")
+  }, [addMessage])
+
+  const handleLanguageChange = useCallback((lang: string) => {
+    setSettings((s) => ({ ...s, userLang: lang }))
+    addMessage(`[Idioma alterado para ${lang === "pt" ? "Português" : lang === "en" ? "English" : "Español"}]`, "system")
+  }, [addMessage])
+
+  const handleNotification = useCallback((message: string, emoji?: string) => {
+    window.dispatchEvent(new CustomEvent("psycho-notification", { detail: { message, emoji: emoji || "💜" } }))
+  }, [])
 
   const toggleVideo = useCallback(async () => {
     if (!isVideoStreaming) {
@@ -138,7 +205,7 @@ export default function App() {
             videoPreviewRef.current.hidden = false
           }
           setIsVideoStreaming(true)
-          addMessage("[Câmera ativada — Psycho pode ver você]", "system")
+          addMessage(`[Câmera ativada — ${agent?.name || "Assistente"} pode ver você]`, "system")
         }
       } catch (err: any) {
         addMessage("[Erro ao ativar câmera: " + err.message + "]", "system")
@@ -150,7 +217,7 @@ export default function App() {
       setIsVideoStreaming(false)
       addMessage("[Câmera desativada]", "system")
     }
-  }, [isVideoStreaming, addMessage])
+  }, [isVideoStreaming, addMessage, agent])
 
   const toggleScreen = useCallback(async () => {
     if (!isScreenSharing) {
@@ -165,7 +232,7 @@ export default function App() {
             videoPreviewRef.current.hidden = false
           }
           setIsScreenSharing(true)
-          addMessage("[Tela compartilhada — Psycho pode ver sua tela]", "system")
+          addMessage(`[Tela compartilhada — ${agent?.name || "Assistente"} pode ver sua tela]`, "system")
         }
       } catch (err: any) {
         addMessage("[Erro ao compartilhar tela: " + err.message + "]", "system")
@@ -177,23 +244,18 @@ export default function App() {
       setIsScreenSharing(false)
       addMessage("[Compartilhamento de tela encerrado]", "system")
     }
-  }, [isScreenSharing, addMessage])
-
-  const handleVoiceChange = useCallback((voice: string) => {
-    setSettings((s) => ({ ...s, voice }))
-    clientRef.current?.setVoice(voice)
-    addMessage(`[Voz alterada para ${voice}]`, "system")
-  }, [addMessage])
+  }, [isScreenSharing, addMessage, agent])
 
   const processCommand = useCallback((cmdName: string, args: string) => {
-    const cmd = COMMANDS.find((c) => c.name === cmdName || c.aliases.includes(cmdName))
+    const cmd = agentCommands.find((c) => c.name === cmdName || c.aliases.includes(cmdName))
     if (!cmd) return
 
     addMessage(`/${cmd.name} ${args}`.trim(), "user")
 
     switch (cmd.name) {
       case "help":
-        addMessage(getHelpText(settings.userLang), "assistant")
+        const helpText = currentAgent === "wellington" ? getHelpTextWellington(settings.userLang) : getHelpText(settings.userLang)
+        addMessage(helpText, "assistant")
         break
       case "clear":
         setMessages([])
@@ -207,34 +269,35 @@ export default function App() {
           addMessage("💡 Use `/volume 50` para definir o volume (1-100).", "assistant")
         }
         break
+      case "timer":
+        const parts = args.split(" ")
+        const mins = parseInt(parts[0])
+        if (!isNaN(mins) && mins > 0) {
+          const label = parts.slice(1).join(" ") || "Timer"
+          handleSetTimer(mins, label)
+        } else {
+          addMessage("💡 Use `/timer 15 batata` para 15 minutos de batata.", "assistant")
+        }
+        break
       default:
         addMessage(`Comando **/${cmd.name}** reconhecido!`, "assistant")
         break
     }
-  }, [addMessage, handleVolumeChange, settings.userLang])
+  }, [agentCommands, addMessage, handleVolumeChange, handleSetTimer, settings.userLang, currentAgent])
 
   const handleCommand = useCallback((cmdName: string) => {
     processCommand(cmdName, "")
   }, [processCommand])
 
-  const handleLanguageChange = useCallback((lang: string) => {
-    setSettings((s) => ({ ...s, userLang: lang }))
-    addMessage(`[Idioma alterado para ${lang === "pt" ? "Português" : lang === "en" ? "English" : "Español"}]`, "system")
-  }, [addMessage])
-
-  const handleNotification = useCallback((message: string, emoji?: string) => {
-    window.dispatchEvent(new CustomEvent("psycho-notification", { detail: { message, emoji: emoji || "💜" } }))
-  }, [])
-
+  // Ambient
   const handleAmbientTrigger = useCallback((event: AmbientEvent) => {
-    if (!clientRef.current?.connected) return
+    if (!clientRef.current?.connected || currentAgent !== "psycho") return
     addMessage(`[Ambiente: ${event.label}]`, "system")
     clientRef.current.sendTextMessage(
       `[Contexto ambiental detectado: ${event.label} (confiança: ${Math.round(event.confidence * 100)}%)] ` +
-      `Inicie a conversa de forma natural e acolhedora, como se você tivesse percebido algo no ambiente. ` +
-      `Não mencione explicitamente que foi uma detecção automática — apenas reaja com empatia ao contexto percebido.`
+      `Inicie a conversa de forma natural e acolhedora.`
     )
-  }, [addMessage])
+  }, [addMessage, currentAgent])
 
   const toggleAmbientListening = useCallback(() => {
     if (!isAmbientListening) {
@@ -243,7 +306,7 @@ export default function App() {
       }
       ambientListenerRef.current.start()
       setIsAmbientListening(true)
-      addMessage("[Modo ambiente ativado — Psycho pode perceber suspiros, silêncio e emoções]", "system")
+      addMessage("[Modo ambiente ativado]", "system")
     } else {
       ambientListenerRef.current?.stop()
       setIsAmbientListening(false)
@@ -251,32 +314,25 @@ export default function App() {
     }
   }, [isAmbientListening, handleAmbientTrigger, addMessage])
 
+  // Message handler
   const handleMessage = useCallback(
     (message: ResponseMessage) => {
       updateDebug(`Mensagem: ${message.type}`)
-
       switch (message.type) {
         case MultimodalLiveResponseType.TEXT:
           addMessage(message.data, "assistant")
           break
-
         case MultimodalLiveResponseType.AUDIO:
           audioPlayerRef.current?.play(message.data)
           break
-
-        case MultimodalLiveResponseType.INPUT_TRANSCRIPTION:
-          break
-
         case MultimodalLiveResponseType.OUTPUT_TRANSCRIPTION:
           if (message.data.finished && message.data.text) {
             addMessage(message.data.text, "assistant")
           }
           break
-
         case MultimodalLiveResponseType.SETUP_COMPLETE:
-          addMessage("Psycho conectado! 💜", "system")
+          addMessage(`${agent?.emoji || "💜"} ${agent?.name || "Assistente"} conectado!`, "system")
           break
-
         case MultimodalLiveResponseType.TOOL_CALL: {
           const functionCalls = message.data.functionCalls
           const responses: { id?: string; name: string; response: Record<string, any> }[] = []
@@ -291,19 +347,15 @@ export default function App() {
           clientRef.current?.sendToolResponse(responses)
           break
         }
-
-        case MultimodalLiveResponseType.TURN_COMPLETE:
-          updateDebug("Turno completo")
-          break
-
         case MultimodalLiveResponseType.INTERRUPTED:
           audioPlayerRef.current?.interrupt()
           break
       }
     },
-    [addMessage, updateDebug]
+    [addMessage, updateDebug, agent]
   )
 
+  // Wake word detection (multi-agent)
   const stopWakeListening = useCallback(() => {
     const rec = wakeRecognitionRef.current
     if (rec) {
@@ -333,21 +385,24 @@ export default function App() {
         .join(" ")
         .toLowerCase()
 
-      const found = WAKE_WORDS.find((w) => fullText.includes(w))
-      if (!found) return
+      // Check each agent's wake words
+      for (const [agentId, agentCfg] of Object.entries(AGENTS)) {
+        const found = agentCfg.wakeWords.find((w) => fullText.includes(w))
+        if (!found) continue
 
-      const allText = Array.from(event.results).map((r) => r[0].transcript).join(" ")
-      const idx = allText.toLowerCase().indexOf(found)
-      const after = allText.slice(idx + found.length).replace(/^[,:\s]+/, "").trim()
-      wakePendingTextRef.current = after
-      stopWakeListening()
-      connectRef.current?.()
+        const allText = Array.from(event.results).map((r) => r[0].transcript).join(" ")
+        const idx = allText.toLowerCase().indexOf(found)
+        const after = allText.slice(idx + found.length).replace(/^[,:\s]+/, "").trim()
+        wakePendingTextRef.current = after
+
+        stopWakeListening()
+        setCurrentAgent(agentId as AgentId)
+        connectRef.current?.()
+        return
+      }
     }
 
-    recognition.onerror = () => {
-      stopWakeListening()
-    }
-
+    recognition.onerror = () => stopWakeListening()
     recognition.onend = () => {
       if (wakeRecognitionRef.current && settings.wakeWordEnabled && !isConnected) {
         try { recognition.start() } catch {}
@@ -359,6 +414,7 @@ export default function App() {
     setIsWakeListening(true)
   }, [stopWakeListening, settings.wakeWordEnabled, isConnected])
 
+  // Audio streaming
   const startAudioStreaming = useCallback(async () => {
     try {
       if (!audioStreamerRef.current && clientRef.current) {
@@ -419,8 +475,9 @@ export default function App() {
     }
   }, [isAudioStreaming, addMessage, settings])
 
+  // Connect to Gemini
   const connect = useCallback(async () => {
-    if (clientRef.current || isConnectingRef.current) return
+    if (clientRef.current || isConnectingRef.current || !agent) return
     isConnectingRef.current = true
     stopWakeListening()
     try {
@@ -429,64 +486,69 @@ export default function App() {
       if (!response.ok) throw new Error(`Falha ao obter token: ${response.statusText}`)
       const { token } = await response.json()
 
-      setConnectionStatus("Conectando ao Psycho...")
+      setConnectionStatus(`Conectando ao ${agent.name}...`)
       const client = new GeminiLiveAPI(token, "gemini-3.1-flash-live-preview")
 
       setConnectionStatus("Carregando memória...")
       const nameContext = settings.userName.trim()
-        ? `\n\nThe user's name is "${settings.userName.trim()}". Always address them by this name naturally — use it in greetings, questions, and throughout the conversation. Respond as if you know them personally.`
+        ? `\n\nThe user's name is "${settings.userName.trim()}". Always address them by this name naturally.`
         : ""
 
       let memoryContext = ""
       try {
-        const ctx = await getSessionContext()
+        const ctx = await getSessionContext(currentAgent === "hub" ? "psycho" : currentAgent)
         if (ctx.recent_sessions?.length || ctx.mood_trend?.length || ctx.active_goals?.length) {
-          memoryContext = "\n\n## MEMORY CONTEXT (from previous sessions)\n"
+          memoryContext = "\n\n## MEMORY CONTEXT\n"
           if (ctx.recent_sessions?.length) {
             memoryContext += "\nRecent sessions:\n" + ctx.recent_sessions
               .slice(0, 3)
               .map((s: any) => `- ${s.title}: ${s.summary || "No summary"}`)
               .join("\n")
           }
-          if (ctx.mood_trend?.length) {
-            memoryContext += "\n\nRecent mood entries (last 5):\n" + ctx.mood_trend
+          if (ctx.mood_trend?.length && currentAgent === "psycho") {
+            memoryContext += "\n\nRecent mood entries:\n" + ctx.mood_trend
               .slice(0, 5)
               .map((m: any) => `- ${m.mood} (intensity: ${m.intensity}/10)`)
               .join("\n")
           }
-          if (ctx.active_goals?.length) {
+          if (ctx.active_goals?.length && currentAgent === "psycho") {
             memoryContext += "\n\nActive goals:\n" + ctx.active_goals
               .map((g: any) => `- "${g.title}" (streak: ${g.current_streak}/${g.target_days} days)`)
               .join("\n")
           }
-          memoryContext += "\n\nUse this context to provide continuity. Reference previous conversations naturally without explicitly saying 'based on your history'."
+          memoryContext += "\n\nUse this context for continuity."
         }
       } catch {}
 
-      client.baseSystemInstructions = SYSTEM_PROMPT
-      client.systemInstructions = SYSTEM_PROMPT + nameContext + memoryContext
+      client.baseSystemInstructions = agent.systemPrompt
+      client.systemInstructions = agent.systemPrompt + nameContext + memoryContext
       client.inputAudioTranscription = true
       client.outputAudioTranscription = true
       client.responseModalities = ["AUDIO"]
       client.voiceName = settings.voice
       client.temperature = settings.temperature
 
-      if (settings.publicMode) {
-        client.setPublicMode(true)
-      }
+      if (settings.publicMode) client.setPublicMode(true)
 
-      client.addFunction(new SetVolumeTool(handleVolumeChange))
-      client.addFunction(new SetWhisperModeTool(handleWhisperChange))
-      client.addFunction(new SetVoiceToneTool(handleToneChange))
-      client.addFunction(new ToggleMicrophoneTool(toggleAudio))
-      client.addFunction(new SetVoiceTool(handleVoiceChange))
-      client.addFunction(new ToggleCameraTool(toggleVideo))
-      client.addFunction(new ToggleScreenShareTool(toggleScreen))
-      client.addFunction(new OpenSettingsTool(() => setSettingsOpen(true)))
-      client.addFunction(new ClearChatTool(() => { setMessages([]); addMessage("[Conversa limpa]", "system") }))
-      client.addFunction(new RunCommandTool(handleCommand))
-      client.addFunction(new SetLanguageTool(handleLanguageChange))
-      client.addFunction(new ShowNotificationTool(handleNotification))
+      // Register agent-specific tools
+      const toolCallbacks = {
+        onVolumeChange: handleVolumeChange,
+        onToneChange: handleToneChange,
+        onToggleAudio: toggleAudio,
+        onVoiceChange: handleVoiceChange,
+        onToggleVideo: toggleVideo,
+        onToggleScreen: toggleScreen,
+        onOpenSettings: () => setSettingsOpen(true),
+        onClearChat: () => { setMessages([]); addMessage("[Conversa limpa]", "system") },
+        onCommand: handleCommand,
+        onLanguageChange: handleLanguageChange,
+        onNotification: handleNotification,
+        onSetTimer: handleSetTimer,
+        onCancelTimer: handleCancelTimer,
+        onLogCooked: handleLogCooked,
+      }
+      const tools = createAgentTools(currentAgent as AgentId, toolCallbacks)
+      tools.forEach((t) => client.addFunction(t))
 
       client.onReceiveResponse = handleMessage
       client.onError = (err) => {
@@ -509,7 +571,7 @@ export default function App() {
 
         const sessId = crypto.randomUUID()
         setSessionId(sessId)
-        try { await createSession("Sessão " + new Date().toLocaleDateString()) } catch {}
+        try { await createSession("Sessão " + new Date().toLocaleDateString(), currentAgent) } catch {}
 
         const pending = wakePendingTextRef.current
         wakePendingTextRef.current = ""
@@ -519,7 +581,8 @@ export default function App() {
         }
 
         if (!greetingShown) {
-          addMessage(getGreeting(settings.userLang, settings.userName), "assistant")
+          const greet = agent.greetingMessages[lang] || agent.greetingMessages["pt"]
+          addMessage(greet, "assistant")
           setGreetingShown(true)
         }
         startAudioStreaming()
@@ -531,13 +594,13 @@ export default function App() {
       audioPlayerRef.current = new AudioPlayer()
       await audioPlayerRef.current.init()
 
-      updateDebug("Psycho conectado")
+      updateDebug(`${agent.name} conectado`)
     } catch (error: any) {
       setConnectionStatus("Falha: " + error.message)
       updateDebug("Erro: " + error.message)
       isConnectingRef.current = false
     }
-  }, [settings, handleMessage, updateDebug, handleVolumeChange, handleWhisperChange, handleToneChange, handleVoiceChange, handleCommand, handleLanguageChange, handleNotification, greetingShown, addMessage, stopWakeListening, toggleAudio, toggleVideo, toggleScreen])
+  }, [settings, agent, currentAgent, handleMessage, updateDebug, handleVolumeChange, handleToneChange, handleVoiceChange, handleCommand, handleLanguageChange, handleNotification, handleSetTimer, handleCancelTimer, handleLogCooked, greetingShown, addMessage, stopWakeListening, toggleAudio, toggleVideo, toggleScreen, lang])
 
   connectRef.current = connect
 
@@ -547,7 +610,7 @@ export default function App() {
       const summaryText = messages
         .filter((m) => m.type === "user" || m.type === "assistant")
         .slice(-10)
-        .map((m) => `${m.type === "user" ? "User" : "Psycho"}: ${m.text.slice(0, 200)}`)
+        .map((m) => `${m.type === "user" ? "User" : agent?.name || "Assistant"}: ${m.text.slice(0, 200)}`)
         .join("\n")
       saveSessionSummary(currentSessionId, summaryText)
     }
@@ -567,12 +630,12 @@ export default function App() {
     setConnectionStatus("Desconectado")
     setIsConnected(false)
     setSessionId(null)
-  }, [sessionId, messages])
+  }, [sessionId, messages, agent])
 
   const sendMessage = useCallback(
     (text: string) => {
       if (!clientRef.current) {
-        addMessage("[Conecte-se ao Psycho primeiro]", "system")
+        addMessage(`[Conecte-se ao ${agent?.name || "assistente"} primeiro]`, "system")
         return
       }
 
@@ -586,13 +649,12 @@ export default function App() {
       audioPlayerRef.current?.interrupt()
       clientRef.current.sendTextMessage(text)
     },
-    [addMessage, processCommand]
+    [addMessage, processCommand, agent]
   )
 
   const updateSetting = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
       setSettings((prev) => ({ ...prev, [key]: value }))
-
       if (key === "voice") {
         const c = clientRef.current
         if (c?.connected) c.setVoice(value as string)
@@ -618,6 +680,7 @@ export default function App() {
     [settings.publicMode, voiceProfileEnrolled]
   )
 
+  // Notifications
   useEffect(() => {
     const handler = (e: CustomEvent) => {
       addMessage(`${e.detail.emoji || "💜"} ${e.detail.message}`, "assistant")
@@ -626,6 +689,7 @@ export default function App() {
     return () => window.removeEventListener("psycho-notification", handler as EventListener)
   }, [addMessage])
 
+  // Voice profile
   useEffect(() => {
     getProfile().then((data) => {
       if (data?.profile_data) {
@@ -635,6 +699,7 @@ export default function App() {
     })
   }, [])
 
+  // Wake word effect
   useEffect(() => {
     if (settings.wakeWordEnabled && !isConnected) {
       startWakeListening()
@@ -644,21 +709,19 @@ export default function App() {
     return () => stopWakeListening()
   }, [settings.wakeWordEnabled, isConnected, startWakeListening, stopWakeListening])
 
+  // Voice training
   const handleTrainVoice = useCallback(async () => {
     if (isTraining) return
     setIsTraining(true)
     setTrainingProgress({ textIndex: 0, totalTexts: 5, phase: "recording" })
-
     try {
       await voiceProfileRef.current.enroll((textIndex: number, phase: "recording" | "processing" | "done") => {
         setTrainingProgress({ textIndex, totalTexts: 5, phase })
       })
       setVoiceProfileEnrolled(true)
       const profileData = voiceProfileRef.current.data
-      if (profileData) {
-        await saveProfile(profileData)
-      }
-      addMessage("[Perfil de voz treinado e salvo! Filtro avançado ativado.]", "system")
+      if (profileData) await saveProfile(profileData)
+      addMessage("[Perfil de voz treinado e salvo!]", "system")
       if (settings.publicMode) {
         audioStreamerRef.current?.setVoiceProfile(voiceProfileRef.current)
         audioStreamerRef.current?.setVoiceFilter(true, settings.voiceFilterThreshold)
@@ -666,7 +729,6 @@ export default function App() {
     } catch (err: any) {
       addMessage("[Erro ao treinar voz: " + err.message + "]", "system")
     }
-
     setIsTraining(false)
     setTrainingProgress(null)
   }, [isTraining, settings.publicMode, settings.voiceFilterThreshold, addMessage])
@@ -685,7 +747,6 @@ export default function App() {
     setIsTestingTimbre(true)
     setTestTimbreScore(null)
     setTestTimbreMatch(null)
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
@@ -695,18 +756,13 @@ export default function App() {
       const analyser = audioContext.createAnalyser()
       analyser.fftSize = 2048
       source.connect(analyser)
-
       const bufferLength = analyser.frequencyBinCount
       const freqData = new Float32Array(bufferLength) as Float32Array<ArrayBuffer>
-
       let totalScore = 0
       let count = 0
-      const duration = 5000
-      const interval = 200
-      const steps = duration / interval
-
+      const steps = 5000 / 200
       for (let i = 0; i < steps; i++) {
-        await new Promise((r) => setTimeout(r, interval))
+        await new Promise((r) => setTimeout(r, 200))
         analyser.getFloatFrequencyData(freqData)
         const score = voiceProfileRef.current.getSimilarity(freqData)
         totalScore += score
@@ -714,27 +770,61 @@ export default function App() {
         setTestTimbreScore(score)
         setTestTimbreMatch(score >= settings.voiceFilterThreshold)
       }
-
       stream.getTracks().forEach((t) => t.stop())
       audioContext.close()
     } catch (err: any) {
       addMessage("[Erro ao testar timbre: " + err.message + "]", "system")
     }
-
     setIsTestingTimbre(false)
   }, [isTestingTimbre, settings.voiceFilterThreshold, addMessage])
 
+  // Render hub
+  if (currentAgent === "hub") {
+    return (
+      <AgentHub
+        onSelectAgent={(id) => {
+          setCurrentAgent(id)
+          setGreetingShown(false)
+          setMessages([])
+        }}
+      />
+    )
+  }
+
+  if (!agent) return null
+
+  // Sidebar page component resolver
+  const renderSidebarPage = (pageId: string) => {
+    const props = { lang: settings.userLang, timers, onRemoveTimer: handleCancelTimer }
+    switch (pageId) {
+      case "encyclopedia": return <RecipeEncyclopedia lang={settings.userLang} />
+      case "cooked": return <CookedRecipes lang={settings.userLang} />
+      case "custom": return <CustomRecipes lang={settings.userLang} />
+      case "timers": return <TimerPanel {...props} />
+      case "sessions": return <SessionReview lang={settings.userLang} />
+      case "mood": return <MoodChart lang={settings.userLang} />
+      case "goals": return <GoalsTracker lang={settings.userLang} />
+      case "techniques": return <TechniqueLib lang={settings.userLang} />
+      default: return null
+    }
+  }
+
+  const isPsycho = currentAgent === "psycho"
+  const bgGradient = isPsycho ? "from-violet-50 via-white to-indigo-50" : "from-amber-50 via-white to-orange-50"
+  const headerGradient = agent.primaryGradient
+  const agentColor = isPsycho ? "psycho" : "warm"
+  const accentRing = isPsycho ? "focus:ring-psycho-500/50" : "focus:ring-orange-500/50"
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-indigo-50">
+    <div className={`min-h-screen bg-gradient-to-br ${bgGradient}`}>
       {/* Header */}
       <motion.header
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-gradient-to-r from-psycho-700 via-psycho-600 to-indigo-600 text-white px-6 py-4 shadow-lg relative overflow-hidden"
+        className={`bg-gradient-to-r ${headerGradient} text-white px-6 py-4 shadow-lg relative overflow-hidden`}
       >
         <div className="absolute -top-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl" />
         <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-white/5 rounded-full blur-xl" />
-        <div className="absolute top-1/2 left-1/3 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
         <div className="relative z-10 flex items-center justify-between max-w-4xl mx-auto">
           <div className="flex items-center gap-3">
             <motion.div
@@ -743,11 +833,22 @@ export default function App() {
               transition={{ type: "spring", stiffness: 200, delay: 0.1 }}
               className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center text-lg shadow-inner"
             >
-              💜
+              {agent.emoji}
             </motion.div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">Psycho</h1>
-              <p className="text-sm text-violet-200 font-light">Seu Assistente Psicológico Pessoal</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-bold tracking-tight">{agent.name}</h1>
+                <button
+                  onClick={() => { disconnect(); setCurrentAgent("hub") }}
+                  className="text-xs px-2 py-0.5 rounded-full bg-white/15 hover:bg-white/25 text-white/70 transition-colors"
+                  title="Voltar ao hub"
+                >
+                  📋
+                </button>
+              </div>
+              <p className={`text-sm ${isPsycho ? "text-violet-200" : "text-amber-200"} font-light`}>
+                {agent.subtitle[lang] || agent.subtitle["pt"]}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -755,7 +856,6 @@ export default function App() {
               whileTap={{ scale: 0.95 }}
               onClick={() => setSettingsOpen(true)}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors text-sm"
-              title="Configurações"
             >
               ⚙️
             </motion.button>
@@ -764,7 +864,7 @@ export default function App() {
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={connect}
-                className="px-4 py-2 rounded-xl text-sm font-medium bg-white text-psycho-700 hover:bg-violet-50 shadow-sm transition-colors"
+                className={`px-4 py-2 rounded-xl text-sm font-medium bg-white ${isPsycho ? "text-psycho-700 hover:bg-violet-50" : "text-orange-700 hover:bg-orange-50"} shadow-sm transition-colors`}
               >
                 Conectar
               </motion.button>
@@ -783,24 +883,69 @@ export default function App() {
       </motion.header>
 
       {/* Main content */}
-      <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
-        {/* Chat */}
-        <Chat messages={messages} onSend={sendMessage} />
+      <main className="max-w-6xl mx-auto px-4 py-6">
+        <div className="flex gap-4">
+          {/* Chat + Controls */}
+          <div className="flex-1 space-y-4 min-w-0">
+            <Chat
+              messages={messages}
+              onSend={sendMessage}
+              agentEmoji={agent.emoji}
+              agentName={agent.name}
+              agentColor={agentColor}
+            />
+            <MediaControls
+              isAudioStreaming={isAudioStreaming}
+              isVideoStreaming={isVideoStreaming}
+              isScreenSharing={isScreenSharing}
+              volume={settings.volume}
+              connectionStatus={isWakeListening ? `🎤 Aguardando '${agent.name}'...` : connectionStatus}
+              isConnected={isConnected}
+              onToggleAudio={toggleAudio}
+              onToggleVideo={toggleVideo}
+              onToggleScreen={toggleScreen}
+              onVolumeChange={handleVolumeChange}
+              videoPreviewRef={videoPreviewRef}
+              agentColor={agentColor}
+            />
+          </div>
 
-        {/* Status + Controls */}
-        <MediaControls
-          isAudioStreaming={isAudioStreaming}
-          isVideoStreaming={isVideoStreaming}
-          isScreenSharing={isScreenSharing}
-          volume={settings.volume}
-          connectionStatus={isWakeListening ? "🎤 Aguardando 'Psycho'..." : connectionStatus}
-          isConnected={isConnected}
-          onToggleAudio={toggleAudio}
-          onToggleVideo={toggleVideo}
-          onToggleScreen={toggleScreen}
-          onVolumeChange={handleVolumeChange}
-          videoPreviewRef={videoPreviewRef}
-        />
+          {/* Sidebar pages */}
+          {agentPages.length > 0 && (
+            <div className="w-80 flex-shrink-0 hidden lg:block space-y-4">
+              <div className="flex gap-1.5 flex-wrap">
+                {agentPages.map((page) => (
+                  <button
+                    key={page.id}
+                    onClick={() => setCurrentPage(currentPage === page.id ? null : page.id)}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all border ${
+                      currentPage === page.id
+                        ? isPsycho
+                          ? "bg-psycho-100 text-psycho-700 border-psycho-300"
+                          : "bg-orange-100 text-orange-700 border-orange-300"
+                        : "bg-white/70 text-slate-500 border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    {page.label[lang] || page.label["pt"]}
+                  </button>
+                ))}
+              </div>
+              <AnimatePresence mode="wait">
+                {currentPage && (
+                  <motion.div
+                    key={currentPage}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    {renderSidebarPage(currentPage)}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Settings Modal */}
@@ -820,9 +965,14 @@ export default function App() {
             isTestingTimbre={isTestingTimbre}
             testTimbreScore={testTimbreScore}
             testTimbreMatch={testTimbreMatch}
+            agentName={agent.name}
+            agentEmoji={agent.emoji}
+            agentColor={agentColor}
           />
         )}
       </AnimatePresence>
     </div>
   )
 }
+
+

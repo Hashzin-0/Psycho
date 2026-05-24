@@ -114,7 +114,6 @@ export class GeminiLiveAPI {
   googleGrounding = false
   voiceName = "Puck"
   temperature = 1.0
-  isWhisperMode = false
   isThinkingMode = false
   inputAudioTranscription = false
   outputAudioTranscription = false
@@ -214,17 +213,6 @@ export class GeminiLiveAPI {
 
   sendSessionUpdate(updateConfig: Record<string, any>) {
     this.sendMessage({ session_update: updateConfig })
-  }
-
-  setWhisperMode(enabled: boolean) {
-    const whisperPrompt = "\n\nIMPORTANT: You must speak in a whisper, very quietly and softly, as if trying not to be overheard. Keep your voice low and gentle at all times."
-    this.systemInstructions = enabled ? this.baseSystemInstructions + whisperPrompt : this.baseSystemInstructions
-    this.isWhisperMode = enabled
-    if (this.connected) {
-      this.sendSessionUpdate({
-        systemInstruction: { parts: [{ text: this.systemInstructions }] },
-      })
-    }
   }
 
   setThinkingMode(enabled: boolean, budget = 1024) {
