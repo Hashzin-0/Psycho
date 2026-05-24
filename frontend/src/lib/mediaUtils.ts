@@ -1,5 +1,12 @@
 import { GeminiLiveAPI } from "./geminilive"
 
+export interface AudioConstraints {
+  noiseSuppression?: boolean
+  echoCancellation?: boolean
+  autoGainControl?: boolean
+  sampleRate?: number
+}
+
 export class AudioStreamer {
   private client: GeminiLiveAPI
   private audioContext: AudioContext | null = null
@@ -12,15 +19,16 @@ export class AudioStreamer {
     this.client = client
   }
 
-  async start(deviceId?: string) {
+  async start(opts?: { deviceId?: string; constraints?: AudioConstraints }) {
+    const c = opts?.constraints || {}
     const audioConstraints: MediaTrackConstraints = {
-      sampleRate: this.sampleRate,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
+      sampleRate: c.sampleRate || this.sampleRate,
+      echoCancellation: c.echoCancellation !== undefined ? c.echoCancellation : true,
+      noiseSuppression: c.noiseSuppression !== undefined ? c.noiseSuppression : true,
+      autoGainControl: c.autoGainControl !== undefined ? c.autoGainControl : true,
     }
-    if (deviceId) {
-      audioConstraints.deviceId = { exact: deviceId }
+    if (opts?.deviceId) {
+      audioConstraints.deviceId = { exact: opts.deviceId }
     }
 
     this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })

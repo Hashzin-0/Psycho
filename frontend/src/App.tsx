@@ -15,6 +15,9 @@ const defaultSettings: Settings = {
   temperature: 0.7,
   volume: 80,
   userLang: "pt",
+  noiseCancellation: true,
+  echoCancellation: true,
+  autoGainControl: true,
 }
 
 function detectUserLanguage(): string {
@@ -33,8 +36,6 @@ function getGreeting(lang: string, name: string): string {
   return base
 }
 
-const WAKE_WORDS = ["psycho", "psico", "psiqui", "psyco"]
-
 export default function App() {
   const [settings, setSettings] = useState<Settings>(() => ({
     ...defaultSettings,
@@ -46,30 +47,16 @@ export default function App() {
   const [debugInfo, setDebugInfo] = useState("Pronto...")
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [isAudioStreaming, setIsAudioStreaming] = useState(false)
-  const [isWakeListening, setIsWakeListening] = useState(false)
   const [greetingShown, setGreetingShown] = useState(false)
 
   const clientRef = useRef<GeminiLiveAPI | null>(null)
   const audioStreamerRef = useRef<AudioStreamer | null>(null)
   const audioPlayerRef = useRef<AudioPlayer | null>(null)
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
   const lastOutputRef = useRef("")
+  const prefsChangedRef = useRef(false)
 
   const addMessage = useCallback((text: string, type: string) => {
     setMessages((prev) => [...prev, { text, type }])
-  }, [])
-
-  const updateLastAssistantMessage = useCallback((text: string) => {
-    setMessages((prev) => {
-      const copy = [...prev]
-      for (let i = copy.length - 1; i >= 0; i--) {
-        if (copy[i].type === "assistant") {
-          copy[i] = { ...copy[i], text }
-          return copy
-        }
-      }
-      return [...prev, { text, type: "assistant" }]
-    })
   }, [])
 
   const updateDebug = useCallback((text: string) => {
@@ -125,17 +112,11 @@ export default function App() {
           break
 
         case MultimodalLiveResponseType.INPUT_TRANSCRIPTION:
-          if (!message.data.finished) addMessage(message.data.text, "user-transcript")
           break
 
         case MultimodalLiveResponseType.OUTPUT_TRANSCRIPTION:
-          if (message.data.text) {
-            lastOutputRef.current = message.data.text
-            updateLastAssistantMessage(message.data.text + "…")
-          }
-          if (message.data.finished && lastOutputRef.current) {
-            updateLastAssistantMessage(lastOutputRef.current)
-            lastOutputRef.current = ""
+          if (message.data.finished && message.data.text) {
+            addMessage(message.data.text, "assistant")
           }
           break
 
@@ -160,17 +141,14 @@ export default function App() {
 
         case MultimodalLiveResponseType.TURN_COMPLETE:
           updateDebug("Turno completo")
-          lastOutputRef.current = ""
           break
 
         case MultimodalLiveResponseType.INTERRUPTED:
-          addMessage("[Interrompido]", "system")
           audioPlayerRef.current?.interrupt()
-          lastOutputRef.current = ""
           break
       }
     },
-    [addMessage, updateDebug, updateLastAssistantMessage]
+    [addMessage, updateDebug]
   )
 
   const connect = useCallback(async () => {
@@ -203,13 +181,13 @@ export default function App() {
       client.onClose = () => {
         setConnectionStatus("Desconectado")
         setIsConnected(false)
+        setIsAudioStreaming(false)
+        audioStreamerRef.current = null
         clientRef.current = null
-        stopWakeListening()
       }
       client.onOpen = () => {
         setConnectionStatus("Conectado")
         setIsConnected(true)
-        if (isWakeListening) stopWakeListening()
         if (!greetingShown) {
           addMessage(getGreeting(settings.userLang, settings.userName), "assistant")
           setGreetingShown(true)
@@ -228,17 +206,17 @@ export default function App() {
       setConnectionStatus("Falha: " + error.message)
       updateDebug("Erro: " + error.message)
     }
-  }, [settings, handleMessage, updateDebug, handleVolumeChange, greetingShown, addMessage, isWakeListening])
+  }, [settings, handleMessage, updateDebug, handleVolumeChange, greetingShown, addMessage])
 
   const disconnect = useCallback(() => {
     clientRef.current?.webSocket?.close()
     clientRef.current = null
     audioStreamerRef.current?.stop()
+    audioStreamerRef.current = null
     audioPlayerRef.current?.destroy()
     setIsAudioStreaming(false)
     setConnectionStatus("Desconectado")
     setIsConnected(false)
-    stopWakeListening()
   }, [])
 
   const startAudioStreaming = useCallback(async () => {
@@ -247,20 +225,35 @@ export default function App() {
         audioStreamerRef.current = new AudioStreamer(clientRef.current)
       }
       if (audioStreamerRef.current) {
-        await audioStreamerRef.current.start()
+        await audioStreamerRef.current.start({
+          constraints: {
+            noiseSuppression: settings.noiseCancellation,
+            echoCancellation: settings.echoCancellation,
+            autoGainControl: settings.autoGainControl,
+          },
+        })
         setIsAudioStreaming(true)
         addMessage("[Microfone ativado automaticamente]", "system")
       }
     } catch (err: any) {
       addMessage("[Erro ao ativar microfone: " + err.message + "]", "system")
     }
-  }, [addMessage])
+  }, [addMessage, settings])
 
   const toggleAudio = useCallback(async () => {
     if (!isAudioStreaming) {
       try {
-        if (audioStreamerRef.current && clientRef.current) {
-          await audioStreamerRef.current.start()
+        if (!audioStreamerRef.current && clientRef.current) {
+          audioStreamerRef.current = new AudioStreamer(clientRef.current)
+        }
+        if (audioStreamerRef.current) {
+          await audioStreamerRef.current.start({
+            constraints: {
+              noiseSuppression: settings.noiseCancellation,
+              echoCancellation: settings.echoCancellation,
+              autoGainControl: settings.autoGainControl,
+            },
+          })
           setIsAudioStreaming(true)
           addMessage("[Microfone ativado]", "system")
         }
@@ -272,63 +265,7 @@ export default function App() {
       setIsAudioStreaming(false)
       addMessage("[Microfone desativado]", "system")
     }
-  }, [isAudioStreaming, addMessage])
-
-  const startWakeListening = useCallback(() => {
-    if (isConnected || isWakeListening) return
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      updateDebug("Wake word não suportado neste navegador")
-      return
-    }
-    try {
-      const recognition = new SpeechRecognition()
-      recognition.lang = "pt-BR"
-      recognition.continuous = true
-      recognition.interimResults = true
-      recognition.maxAlternatives = 3
-
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = event.results[i][0].transcript.toLowerCase().trim()
-          if (WAKE_WORDS.some((w) => transcript.includes(w))) {
-            addMessage("[Palavra de ativação detectada: Psycho]", "system")
-            recognition.stop()
-            setIsWakeListening(false)
-            connect()
-            return
-          }
-        }
-      }
-
-      recognition.onerror = () => {
-        setIsWakeListening(false)
-        setTimeout(() => startWakeListening(), 3000)
-      }
-
-      recognition.onend = () => {
-        if (isWakeListening && !isConnected) {
-          setTimeout(() => startWakeListening(), 1000)
-        }
-      }
-
-      recognitionRef.current = recognition
-      setIsWakeListening(true)
-      recognition.start()
-      updateDebug("Ouvindo palavra de ativação...")
-    } catch {
-      updateDebug("Erro ao iniciar wake word")
-    }
-  }, [isConnected, isWakeListening, addMessage, connect, updateDebug])
-
-  const stopWakeListening = useCallback(() => {
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop() } catch {}
-      recognitionRef.current = null
-    }
-    setIsWakeListening(false)
-    if (!isConnected) updateDebug("Pronto...")
-  }, [isConnected, updateDebug])
+  }, [isAudioStreaming, addMessage, settings])
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -352,10 +289,13 @@ export default function App() {
   const updateSetting = useCallback(
     <K extends keyof Settings>(key: K, value: Settings[K]) => {
       setSettings((prev) => ({ ...prev, [key]: value }))
-      if (key === "voice" || key === "temperature") {
+
+      if (key === "voice") {
         const c = clientRef.current
-        if (!c?.connected) return
-        if (key === "voice") c.setVoice(value as string)
+        if (c?.connected) c.setVoice(value as string)
+      }
+      if (["noiseCancellation", "echoCancellation", "autoGainControl"].includes(key as string)) {
+        prefsChangedRef.current = true
       }
     },
     []
@@ -392,35 +332,19 @@ export default function App() {
             </motion.div>
             <div>
               <h1 className="text-2xl font-bold tracking-tight">Psycho</h1>
-              <p className="text-sm text-violet-200 font-light">
-                {isWakeListening
-                  ? "🎤 Ouvindo... diga 'Psycho'"
-                  : "Seu Assistente Psicológico Pessoal"}
-              </p>
+              <p className="text-sm text-violet-200 font-light">Seu Assistente Psicológico Pessoal</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {!isConnected ? (
-              <>
-                {!isWakeListening && (
-                  <motion.button
-                    whileHover={{ scale: 1.03 }}
-                    whileTap={{ scale: 0.97 }}
-                    onClick={startWakeListening}
-                    className="px-4 py-2 rounded-xl text-sm font-medium bg-psycho-500/30 text-white hover:bg-psycho-500/50 transition-colors backdrop-blur-sm border border-white/10"
-                  >
-                    🎤 Ativar Voz
-                  </motion.button>
-                )}
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={connect}
-                  className="px-4 py-2 rounded-xl text-sm font-medium bg-white text-psycho-700 hover:bg-violet-50 shadow-sm transition-colors"
-                >
-                  Conectar
-                </motion.button>
-              </>
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={connect}
+                className="px-4 py-2 rounded-xl text-sm font-medium bg-white text-psycho-700 hover:bg-violet-50 shadow-sm transition-colors"
+              >
+                Conectar
+              </motion.button>
             ) : (
               <motion.button
                 whileHover={{ scale: 1.03 }}
@@ -440,7 +364,7 @@ export default function App() {
         {/* Chat */}
         <Chat messages={messages} onSend={sendMessage} />
 
-        {/* Status + Settings */}
+        {/* Status + Controls */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -448,7 +372,7 @@ export default function App() {
         >
           <div className="flex items-center gap-3">
             <span className={`inline-block w-2 h-2 rounded-full ${
-              isConnected ? "bg-emerald-400 animate-pulse" : isWakeListening ? "bg-amber-400 animate-pulse" : "bg-slate-300"
+              isConnected ? "bg-emerald-400 animate-pulse" : "bg-slate-300"
             }`} />
             <span className="text-xs font-medium text-slate-500">{connectionStatus}</span>
             {settings.userName && (
@@ -480,9 +404,6 @@ export default function App() {
             </motion.button>
           </div>
         </motion.div>
-
-        {/* Debug info (hidden from normal users) */}
-        {/* <pre className="text-xs text-violet-400">{debugInfo}</pre> */}
       </main>
 
       {/* Settings Modal */}

@@ -6,6 +6,9 @@ export interface Settings {
   temperature: number
   volume: number
   userLang: string
+  noiseCancellation: boolean
+  echoCancellation: boolean
+  autoGainControl: boolean
 }
 
 interface Props {
@@ -25,14 +28,34 @@ const toneOptions = [
 
 const langOptions = [
   { value: "pt", label: "Português" },
-  { value: "en", "label": "English" },
-  { value: "es", "label": "Español" },
+  { value: "en", label: "English" },
+  { value: "es", label: "Español" },
 ]
+
+function Toggle({ checked, onChange, label, desc }: { checked: boolean; onChange: (v: boolean) => void; label: string; desc?: string }) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer group">
+      <div className="relative mt-0.5 flex-shrink-0">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="sr-only peer"
+        />
+        <div className="w-10 h-5 rounded-full bg-slate-200 peer-checked:bg-psycho-500 transition-colors" />
+        <div className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm peer-checked:translate-x-5 transition-transform" />
+      </div>
+      <div>
+        <span className="text-sm font-medium text-slate-700 group-hover:text-slate-900 transition-colors">{label}</span>
+        {desc && <span className="block text-xs text-slate-400 mt-0.5">{desc}</span>}
+      </div>
+    </label>
+  )
+}
 
 export default function SettingsModal({ open, settings, onClose, onChange }: Props) {
   if (!open) return null
 
-  const t = langOptions.find(l => l.value === settings.userLang)
   const lang = settings.userLang as "pt" | "en" | "es"
 
   return (
@@ -48,10 +71,10 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 10 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col"
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-psycho-600 to-indigo-600 px-6 py-5 text-white">
+        <div className="bg-gradient-to-r from-psycho-600 to-indigo-600 px-6 py-5 text-white flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-2xl">💜</span>
@@ -72,8 +95,8 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5">
-          {/* Nome / Como chamar */}
+        <div className="p-6 space-y-6 overflow-y-auto">
+          {/* Como chamar */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
               {lang === "pt" ? "Como devo te chamar?" : lang === "es" ? "¿Cómo debo llamarte?" : "What should I call you?"}
@@ -130,14 +153,10 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
                         : "bg-slate-50 border-2 border-transparent hover:bg-violet-50"
                     }`}
                   >
-                    <span className={`block text-sm font-semibold ${
-                      isActive ? "text-psycho-700" : "text-slate-600"
-                    }`}>
+                    <span className={`block text-sm font-semibold ${isActive ? "text-psycho-700" : "text-slate-600"}`}>
                       {opt.label[lang] || opt.label["pt"]}
                     </span>
-                    <span className={`block text-[10px] mt-0.5 ${
-                      isActive ? "text-psycho-500" : "text-slate-400"
-                    }`}>
+                    <span className={`block text-[10px] mt-0.5 ${isActive ? "text-psycho-500" : "text-slate-400"}`}>
                       {opt.desc[lang] || opt.desc["pt"]}
                     </span>
                   </button>
@@ -168,6 +187,33 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
             </div>
           </div>
 
+          {/* Qualidade do Áudio */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">
+              {lang === "pt" ? "Qualidade do Áudio" : lang === "es" ? "Calidad de Audio" : "Audio Quality"}
+            </label>
+            <div className="space-y-3 bg-slate-50/70 rounded-2xl p-4 border border-slate-100">
+              <Toggle
+                checked={settings.noiseCancellation}
+                onChange={(v) => onChange("noiseCancellation", v)}
+                label={lang === "pt" ? "Cancelamento de Ruído" : lang === "es" ? "Cancelación de Ruido" : "Noise Cancellation"}
+                desc={lang === "pt" ? "Remove ruídos de fundo (ventilador, trânsito)" : lang === "es" ? "Elimina ruidos de fondo" : "Removes background noise"}
+              />
+              <Toggle
+                checked={settings.echoCancellation}
+                onChange={(v) => onChange("echoCancellation", v)}
+                label={lang === "pt" ? "Cancelamento de Eco" : lang === "es" ? "Cancelación de Eco" : "Echo Cancellation"}
+                desc={lang === "pt" ? "Evita eco e reverberação do áudio" : lang === "es" ? "Evita eco y reverberación" : "Prevents audio echo and reverberation"}
+              />
+              <Toggle
+                checked={settings.autoGainControl}
+                onChange={(v) => onChange("autoGainControl", v)}
+                label={lang === "pt" ? "Controle Automático de Ganho" : lang === "es" ? "Control Automático de Ganancia" : "Auto Gain Control"}
+                desc={lang === "pt" ? "Ajusta automaticamente o volume do microfone" : lang === "es" ? "Ajusta automáticamente el volumen del micrófono" : "Automatically adjusts microphone volume"}
+              />
+            </div>
+          </div>
+
           {/* Idioma */}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
@@ -192,7 +238,7 @@ export default function SettingsModal({ open, settings, onClose, onChange }: Pro
         </div>
 
         {/* Footer */}
-        <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-end">
+        <div className="bg-slate-50 border-t border-slate-100 px-6 py-4 flex justify-end flex-shrink-0">
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
